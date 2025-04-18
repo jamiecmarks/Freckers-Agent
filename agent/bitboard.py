@@ -16,9 +16,22 @@ class BitBoard:
             board = self.get_start_board()
         self.board = board
         print("possible jumps")
+        for jump, res in self.get_all_moves():
+            print(jump, res)
 
     def get_board(self):
         return self.board
+
+    def get_all_moves(self):
+        possible_moves = []
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if self.board[r][c] == self.FROG:
+                    coord = Coord(r, c)
+                    moves = self.get_possible_move(coord)
+                    possible_moves.extend(moves)
+
+        return possible_moves
 
     def get_start_board(self):
         board = np.full((BOARD_N, BOARD_N), self.EMPTY, dtype=int)

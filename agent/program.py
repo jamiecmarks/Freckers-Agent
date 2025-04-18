@@ -6,6 +6,7 @@ import numpy as np
 import random
 from .internal_state import FreckersState
 from .bitboard import BitBoard
+from .mcts import MonteCarloTreeSearchNode
 
 
 class Agent:
@@ -23,6 +24,7 @@ class Agent:
 
         bitboard = BitBoard()
         print(bitboard.get_board())
+        mcts = MonteCarloTreeSearchNode(bitboard, color)
 
         match color:
             case PlayerColor.RED:
