@@ -1,9 +1,12 @@
 # COMP30024 Artificial Intelligence, Semester 1 2025
 # Project Part B: Game Playing Agent
 
-from referee.game import PlayerColor, Coord, Direction, \
-    Action, MoveAction, GrowAction
-    
+from referee.game import PlayerColor, Coord, Direction, Action, MoveAction, GrowAction
+import numpy as np
+import random
+from .internal_state import FreckersState
+from .bitboard import BitBoard
+
 
 class Agent:
     """
@@ -17,6 +20,10 @@ class Agent:
         Any setup and/or precomputation should be done here.
         """
         self._color = color
+
+        bitboard = BitBoard()
+        print(bitboard.get_board())
+
         match color:
             case PlayerColor.RED:
                 print("Testing: I am playing as RED")
@@ -26,7 +33,7 @@ class Agent:
     def action(self, **referee: dict) -> Action:
         """
         This method is called by the referee each time it is the agent's turn
-        to take an action. It must always return an action object. 
+        to take an action. It must always return an action object.
         """
 
         # Below we have hardcoded two actions to be played depending on whether
@@ -36,10 +43,7 @@ class Agent:
         match self._color:
             case PlayerColor.RED:
                 print("Testing: RED is playing a MOVE action")
-                return MoveAction(
-                    Coord(0, 3),
-                    [Direction.Down]
-                )
+                return MoveAction(Coord(0, 3), [Direction.Down])
             case PlayerColor.BLUE:
                 print("Testing: BLUE is playing a GROW action")
                 return GrowAction()
@@ -47,7 +51,7 @@ class Agent:
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """
         This method is called by the referee after a player has taken their
-        turn. You should use it to update the agent's internal game state. 
+        turn. You should use it to update the agent's internal game state.
         """
 
         # There are two possible action types: MOVE and GROW. Below we check
