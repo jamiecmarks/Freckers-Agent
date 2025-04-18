@@ -12,21 +12,72 @@ class BitBoard:
     OPPONENT = 0b11
 
     def __init__(self, board=None):
+        test = board is None
         if board is None:
             board = self.get_start_board()
         self.board = board
-        print("possible jumps")
-        for jump, res in self.get_all_moves():
-            print(jump, res)
+        self.current_player = self.FROG
+        self.toggle_player()
+
+        if test:
+            print("possible jumps")
+            poss = self.get_possible_move(Coord(7, 3))
+            for jump, res in poss:
+                print(jump, res)
+            print(f"Doing action {poss[0][0]}")
+            print(self.move(poss[0][0], poss[0][1]).get_board())
 
     def get_board(self):
         return self.board
+
+    def get_current_player(self):
+        return self.current_player
+
+    def toggle_player(self):
+        if self.current_player == self.FROG:
+            self.current_player = self.OPPONENT
+        else:
+            self.current_player = self.FROG
+
+    def move(self, action: MoveAction | GrowAction, res: Coord):
+        """Move the frog to the new position"""
+
+        board_copy = np.copy(self.board)
+        fill = self.current_player
+
+        if isinstance(action, GrowAction):
+            for pos in self.get_all_pos(fill):
+                for direction in Direction:
+                    next_c = pos.c + direction.c
+                    next_r = pos.r + direction.r
+                    if (
+                        next_c >= 0
+                        and next_c < BOARD_N
+                        and next_r >= 0
+                        and next_r < BOARD_N
+                        and board_copy[next_r][next_c] == self.EMPTY
+                    ):
+                        board_copy[next_r][next_c] = self.LILLY
+        else:
+            board_copy = np.copy(self.board)
+            board_copy[action.coord.r][action.coord.c] = self.EMPTY
+            board_copy[res.r][res.c] = fill
+
+        return BitBoard(board_copy)
+
+    def get_all_pos(self, pos_type):
+        out = []
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if self.board[r][c] == pos_type:
+                    out.append(Coord(r, c))
+        return out
 
     def get_all_moves(self):
         possible_moves = []
         for r in range(BOARD_N):
             for c in range(BOARD_N):
-                if self.board[r][c] == self.FROG:
+                if self.board[r][c] == self.current_player:
                     coord = Coord(r, c)
                     moves = self.get_possible_move(coord)
                     possible_moves.extend(moves)
@@ -69,9 +120,14 @@ class BitBoard:
 
         visited.add(coord)
 
+        if self.current_player == self.FROG:
+            forward = 1
+        else:
+            forward = -1
+
         for direction in Direction:
             single_jump = MoveAction(coord, [direction])
-            if self.is_valid_move(single_jump) and not in_jump:
+            if self.is_valid_move(single_jump, forward) and not in_jump:
                 possible_jumps.append((single_jump, coord + direction))
 
             try:
@@ -81,7 +137,7 @@ class BitBoard:
                 # Skip invalid coordinates
                 continue
             if (
-                self.is_valid_move(MoveAction(first_jump, direction))
+                self.is_valid_move(MoveAction(first_jump, direction), forward)
                 and (double_jump_res not in visited)
                 and self.board[first_jump.r][first_jump.c]
                 in [
