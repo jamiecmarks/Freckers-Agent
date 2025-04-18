@@ -16,22 +16,22 @@ class BitBoard:
         return self.board
 
     def get_start_board(self):
-        board = np.full((8, 8), 0b0, dtype=int)
+        board = np.full((8, 8), self.EMPTY, dtype=int)
 
         # Initialize lily pads and starting frog positions based on game rules [66, Figure 3]
         for r in [0, 7]:
             for c in range(1, 7):
-                board[r][c] = 0b01 if r == 0 else 0b10
+                board[r][c] = self.FROG if r == 0 else self.OPPONENT
 
         for r in [1]:
             opp_r = 7 - r
             for c in range(1, 7):
-                if board[r][c] == 0b00:
-                    board[r][c] = 0b11
-                    board[opp_r][c] = 0b11
+                if board[r][c] == self.EMPTY:
+                    board[r][c] = self.LILLY
+                    board[opp_r][c] = self.LILLY
 
         for r in [0]:
             for c in [0, 7]:
-                board[r][c] = 0b11
-                board[7 - r][c] = 0b11
+                board[r][c] = self.LILLY
+                board[7 - r][c] = self.LILLY
         return board
