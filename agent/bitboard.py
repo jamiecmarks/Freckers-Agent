@@ -12,20 +12,19 @@ class BitBoard:
     OPPONENT = 0b11
 
     def __init__(self, board=None):
-        test = board is None
         if board is None:
             board = self.get_start_board()
         self.board = board
         self.current_player = self.FROG
-        self.toggle_player()
 
-        if test:
-            print("possible jumps")
-            poss = self.get_possible_move(Coord(7, 3))
-            for jump, res in poss:
-                print(jump, res)
-            print(f"Doing action {poss[0][0]}")
-            print(self.move(poss[0][0], poss[0][1]).get_board())
+        self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
+        # if test:
+        #     print("possible jumps")
+        #     poss = self.get_possible_move(Coord(0, 2))
+        #     for jump, res in poss:
+        #         print(jump, res)
+        #     print(f"Doing action {poss[0][0]}")
+        #     print(self.move(poss[0][0], poss[0][1]).get_board())
 
     def get_board(self):
         return self.board
@@ -38,6 +37,46 @@ class BitBoard:
             self.current_player = self.OPPONENT
         else:
             self.current_player = self.FROG
+
+    def is_game_over(self):
+        self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
+        # for r in [0, BOARD_N - 1]:
+        for c in range(BOARD_N):
+            if self.board[BOARD_N - 1][c] == self.FROG:
+                self.frog_border_count[self.FROG] += 1
+            elif self.board[0][c] == self.OPPONENT:
+                self.frog_border_count[self.OPPONENT] += 1
+        return (
+            self.frog_border_count[self.FROG] == BOARD_N - 2
+            or self.frog_border_count[self.OPPONENT] == BOARD_N - 2
+        )
+
+    def get_winner(self):
+        # if self.is_game_over():
+        # frog_count = {self.FROG: 0, self.OPPONENT: 0}
+        # for r in [0, BOARD_N - 1]:
+        #     for c in range(BOARD_N):
+        #         if self.board[r][c] == self.FROG:
+        #             frog_count[self.FROG] += 1
+        #         elif self.board[r][c] == self.OPPONENT:
+        #             frog_count[self.OPPONENT] += 1
+        if max(self.frog_border_count.values()) == BOARD_N - 2:
+            if (
+                self.frog_border_count[self.FROG] == BOARD_N - 2
+                and self.frog_border_count[self.OPPONENT] != BOARD_N - 2
+            ):
+                return 1
+            elif (
+                self.frog_border_count[self.OPPONENT] == BOARD_N - 2
+                and self.frog_border_count[self.FROG] != BOARD_N - 2
+            ):
+                return -1
+            else:
+                return 0
+
+        return 0
+
+    # return None
 
     def move(self, action: MoveAction | GrowAction, res: Coord):
         """Move the frog to the new position"""
@@ -155,7 +194,7 @@ class BitBoard:
                     double_jump_res, visited, True
                 ):
                     possible_jumps.append(
-                        (MoveAction(coord, [direction] + jump.directions), res)
+                        (MoveAction(coord, [direction] + list(jump.directions)), res)
                     )
 
         return possible_jumps

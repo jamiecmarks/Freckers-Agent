@@ -23,8 +23,10 @@ class Agent:
         self._color = color
 
         bitboard = BitBoard()
-        print(bitboard.get_board())
-        mcts = MonteCarloTreeSearchNode(bitboard, color)
+        # print(bitboard.get_board())
+        root = MonteCarloTreeSearchNode(bitboard)
+        selected_node = root.best_action()
+        print(selected_node)
 
         match color:
             case PlayerColor.RED:
