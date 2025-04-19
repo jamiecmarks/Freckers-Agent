@@ -43,12 +43,13 @@ class Agent:
         # the initial moves of the game, so you should use some game playing
         # technique(s) to determine the best action to take.
 
-        if self.test_count < 1:
+        if self.test_count < 3:
             self.test_count += 1
             print("Testing MCTS")
             action_out = self.root.best_action()
             # self.root.state.toggle_player()
 
+            # print(action_out["res_node"].state.get_board())
             return action_out["action"]
 
         match self._color:
@@ -74,10 +75,10 @@ class Agent:
         if child is None:
             # create a new child node
             new_board = self.root.state.move(action)
-            new_board.toggle_player()
-            child = MonteCarloTreeSearchNode(
-                new_board
-            )  # default perspective is from blue
+            # TODO: Does red always go first?
+            if self._color == PlayerColor.BLUE:
+                new_board.toggle_player()
+            child = MonteCarloTreeSearchNode(new_board)
 
         self.root = child
 

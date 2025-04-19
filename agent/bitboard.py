@@ -84,6 +84,9 @@ class BitBoard:
         board_copy = np.copy(self.board)
         fill = self.current_player
 
+        if isinstance(action, MoveAction):
+            fill = self.board[action.coord.r][action.coord.c]
+
         if isinstance(action, GrowAction):
             for pos in self.get_all_pos(fill):
                 for direction in Direction:
@@ -111,15 +114,6 @@ class BitBoard:
                     # this shouldn't ever give an error because ref is supposed to check
                     if board_copy[next_coord.r][next_coord.c] == self.LILLY:
                         found_move = True
-                    # next_c = action.coord.c + direction.c
-                    # next_r = action.coord.r + direction.r
-
-                    # if (
-                    #     next_c >= 0
-                    #     and next_c < BOARD_N
-                    #     and next_r >= 0
-                    #     and next_r < BOARD_N
-                    # ):
             board_copy[action.coord.r][action.coord.c] = self.EMPTY
             board_copy[next_coord.r][next_coord.c] = fill
 
@@ -153,7 +147,7 @@ class BitBoard:
 
         for r in [1]:
             opp_r = BOARD_N - 1 - r
-            for c in range(1, BOARD_N):
+            for c in range(1, BOARD_N - 1):
                 if board[r][c] == self.EMPTY:
                     board[r][c] = self.LILLY
                     board[opp_r][c] = self.LILLY
