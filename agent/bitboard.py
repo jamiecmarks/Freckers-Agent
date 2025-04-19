@@ -78,7 +78,7 @@ class BitBoard:
 
     # return None
 
-    def move(self, action: MoveAction | GrowAction, res: Coord):
+    def move(self, action: MoveAction | GrowAction, res: Coord | None = None):
         """Move the frog to the new position"""
 
         board_copy = np.copy(self.board)
@@ -97,10 +97,31 @@ class BitBoard:
                         and board_copy[next_r][next_c] == self.EMPTY
                     ):
                         board_copy[next_r][next_c] = self.LILLY
-        else:
+        elif res is not None:
             board_copy = np.copy(self.board)
             board_copy[action.coord.r][action.coord.c] = self.EMPTY
             board_copy[res.r][res.c] = fill
+        else:
+            next_coord = action.coord
+            for direction in action.directions:
+                found_move = False
+                direction_test = direction
+                while not found_move:
+                    next_coord = next_coord + direction_test
+                    # this shouldn't ever give an error because ref is supposed to check
+                    if board_copy[next_coord.r][next_coord.c] == self.LILLY:
+                        found_move = True
+                    # next_c = action.coord.c + direction.c
+                    # next_r = action.coord.r + direction.r
+
+                    # if (
+                    #     next_c >= 0
+                    #     and next_c < BOARD_N
+                    #     and next_r >= 0
+                    #     and next_r < BOARD_N
+                    # ):
+            board_copy[action.coord.r][action.coord.c] = self.EMPTY
+            board_copy[next_coord.r][next_coord.c] = fill
 
         return BitBoard(board_copy)
 

@@ -51,6 +51,8 @@ class MonteCarloTreeSearchNode:
                 break
             action = self.rollout_policy(possible_moves)
             current_rollout_state = current_rollout_state.move(action[0], action[1])
+            # TODO: is this correct? I feel like the reward is not properly getting propogated upward
+            current_rollout_state.toggle_player()
             depth += 1
 
         return current_rollout_state.get_winner()
@@ -82,7 +84,6 @@ class MonteCarloTreeSearchNode:
     def _tree_policy(self):
         current_node = self
         while not current_node.is_terminal_node():
-            print("node not at terminal")
             if not current_node.is_fully_expanded():
                 return current_node.expand()
             else:
@@ -95,4 +96,14 @@ class MonteCarloTreeSearchNode:
             reward = v.rollout()
             v.backpropagate(reward)
         best = self.best_child(c_param=0.0)
-        return best.parent_action if best else None
+        return {
+            "action": best.parent_action[0],
+            "res": best.parent_action[1],
+            "res_node": best,
+        }  # if best else None
+
+    def find_child(self, action):
+        for child in self.children:
+            if child.parent_action == action:
+                return child
+        return None

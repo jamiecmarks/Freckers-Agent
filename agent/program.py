@@ -23,16 +23,14 @@ class Agent:
         self._color = color
 
         bitboard = BitBoard()
-        # print(bitboard.get_board())
-        root = MonteCarloTreeSearchNode(bitboard)
-        selected_node = root.best_action()
-        print(selected_node)
 
+        self.test_count = 0
         match color:
             case PlayerColor.RED:
                 print("Testing: I am playing as RED")
             case PlayerColor.BLUE:
                 print("Testing: I am playing as BLUE")
+        self.root = MonteCarloTreeSearchNode(bitboard)
 
     def action(self, **referee: dict) -> Action:
         """
@@ -44,6 +42,15 @@ class Agent:
         # the agent is playing as BLUE or RED. Obviously this won't work beyond
         # the initial moves of the game, so you should use some game playing
         # technique(s) to determine the best action to take.
+
+        if self.test_count < 1:
+            self.test_count += 1
+            print("Testing MCTS")
+            action_out = self.root.best_action()
+            # self.root.state.toggle_player()
+
+            return action_out["action"]
+
         match self._color:
             case PlayerColor.RED:
                 print("Testing: RED is playing a MOVE action")
@@ -62,6 +69,18 @@ class Agent:
         # which type of action was played and print out the details of the
         # action for demonstration purposes. You should replace this with your
         # own logic to update your agent's internal game state representation.
+        child = self.root.find_child(action)
+
+        if child is None:
+            # create a new child node
+            new_board = self.root.state.move(action)
+            new_board.toggle_player()
+            child = MonteCarloTreeSearchNode(
+                new_board
+            )  # default perspective is from blue
+
+        self.root = child
+
         match action:
             case MoveAction(coord, dirs):
                 dirs_text = ", ".join([str(dir) for dir in dirs])
