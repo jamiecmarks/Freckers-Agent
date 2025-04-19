@@ -117,7 +117,9 @@ class BitBoard:
             board_copy[action.coord.r][action.coord.c] = self.EMPTY
             board_copy[next_coord.r][next_coord.c] = fill
 
-        return BitBoard(board_copy)
+        new_board = BitBoard(board_copy)
+        new_board.current_player = self.current_player
+        return new_board
 
     def get_all_pos(self, pos_type):
         out = []
@@ -135,6 +137,9 @@ class BitBoard:
                     coord = Coord(r, c)
                     moves = self.get_possible_move(coord)
                     possible_moves.extend(moves)
+
+        # GrowAction always an option
+        possible_moves.append((GrowAction(), None))
 
         return possible_moves
 
@@ -191,7 +196,7 @@ class BitBoard:
                 # Skip invalid coordinates
                 continue
             if (
-                self.is_valid_move(MoveAction(first_jump, direction), forward)
+                self.is_valid_move(MoveAction(first_jump, [direction]), forward)
                 and (double_jump_res not in visited)
                 and self.board[first_jump.r][first_jump.c]
                 in [
@@ -199,7 +204,7 @@ class BitBoard:
                     self.OPPONENT,
                 ]
             ):
-                double_jump = MoveAction(coord, direction)
+                double_jump = MoveAction(coord, [direction])
 
                 # add the double jump
                 possible_jumps.append((double_jump, double_jump_res))

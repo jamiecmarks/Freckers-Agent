@@ -27,7 +27,9 @@ class MonteCarloTreeSearchNode:
         return self._number_of_visits
 
     def expand(self):
-        action_res = self._untried_actions.pop()
+        # action_res = self._untried_actions.pop()
+        idx = np.random.randint(len(self._untried_actions))
+        action_res = self._untried_actions.pop(idx)
         action, res = action_res
         next_state = self.state.move(action, res)
         next_state.toggle_player()
@@ -52,7 +54,7 @@ class MonteCarloTreeSearchNode:
             action = self.rollout_policy(possible_moves)
             current_rollout_state = current_rollout_state.move(action[0], action[1])
             # TODO: is this correct? I feel like the reward is not properly getting propogated upward
-            # current_rollout_state.toggle_player()
+            current_rollout_state.toggle_player()
             depth += 1
 
         return current_rollout_state.get_winner()
@@ -105,6 +107,7 @@ class MonteCarloTreeSearchNode:
 
     def find_child(self, action):
         for child in self.children:
-            if child.parent_action == action:
+            if child.parent_action[0] == action:
                 return child
+
         return None
