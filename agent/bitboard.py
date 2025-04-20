@@ -3,9 +3,6 @@ from referee.game.actions import MoveAction, GrowAction
 from referee.game.coord import Coord, Direction
 from referee.game.constants import BOARD_N
 
-# Global cache: maps (board_tuple, current_player) to move lists
-t_move_cache: dict[tuple, list[tuple[MoveAction, Coord]]] = {}
-
 
 class BitBoard:
     LILLY = 0b01
@@ -104,12 +101,6 @@ class BitBoard:
         return out
 
     def get_all_moves(self):
-        # use tuple(board.flatten()) and player to key cache
-        key = (tuple(self.board.flatten()), self.current_player)
-        if key in t_move_cache:
-            # return a fresh list so callers can mutate without affecting cache
-            return t_move_cache[key].copy()
-
         possible_moves = []
         for r in range(BOARD_N):
             for c in range(BOARD_N):
@@ -121,7 +112,6 @@ class BitBoard:
         # GrowAction always an option
         possible_moves.append((GrowAction(), None))
         # cache the base list, but return a copy to callers
-        t_move_cache[key] = possible_moves
         return possible_moves.copy()
 
     def get_start_board(self):
