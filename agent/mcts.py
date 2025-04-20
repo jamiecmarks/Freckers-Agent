@@ -1,6 +1,6 @@
 import numpy as np
 from collections import defaultdict
-from agent.bitboard import BitBoard
+from .bitboard import BitBoard
 from referee.game.actions import GrowAction, MoveAction
 from referee.game.coord import Coord
 from referee.game.constants import BOARD_N
