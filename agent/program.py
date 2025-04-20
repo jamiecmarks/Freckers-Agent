@@ -4,7 +4,6 @@
 from referee.game import PlayerColor, Coord, Direction, Action, MoveAction, GrowAction
 import numpy as np
 import random
-from .internal_state import FreckersState
 from .bitboard import BitBoard
 from .mcts import MonteCarloTreeSearchNode
 from referee.game.constants import MAX_TURNS
