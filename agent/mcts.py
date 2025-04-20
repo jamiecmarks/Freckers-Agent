@@ -1,6 +1,9 @@
 import numpy as np
 from collections import defaultdict
 from agent.bitboard import BitBoard
+from referee.game.actions import GrowAction, MoveAction
+from referee.game.coord import Coord
+from referee.game.constants import BOARD_N
 
 
 class MonteCarloTreeSearchNode:
@@ -44,7 +47,7 @@ class MonteCarloTreeSearchNode:
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 150
+        max_depth = 20
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
@@ -53,9 +56,21 @@ class MonteCarloTreeSearchNode:
                 break
             action = self.rollout_policy(possible_moves)
             current_rollout_state = current_rollout_state.move(action[0], action[1])
-            # TODO: is this correct? I feel like the reward is not properly getting propogated upward
             current_rollout_state.toggle_player()
             depth += 1
+
+        # didn't reach a terminal state
+        if not current_rollout_state.is_game_over():
+            # positive = good for current player, negative otherwise
+            score = 0
+            board = current_rollout_state.get_board()
+            for r in range(BOARD_N):
+                for c in range(BOARD_N):
+                    if board[r][c] == current_rollout_state.FROG:
+                        score += r
+                    elif board[r][c] == current_rollout_state.OPPONENT:
+                        score -= BOARD_N - 1 - r
+            return 1 if score > 0 else (-1 if score < 0 else 0)
 
         return current_rollout_state.get_winner()
 
@@ -68,7 +83,7 @@ class MonteCarloTreeSearchNode:
     def is_fully_expanded(self):
         return len(self._untried_actions) == 0
 
-    def best_child(self, c_param=0.1):
+    def best_child(self, c_param=0.125):
         choices_weights = []
         for c in self.children:
             if c.n() == 0:
@@ -77,10 +92,43 @@ class MonteCarloTreeSearchNode:
                 choices_weights.append(
                     (c.q() / c.n()) + c_param * np.sqrt((2 * np.log(self.n()) / c.n()))
                 )
-
         return self.children[np.argmax(choices_weights)]
 
+    def heuristic_score(self, move, current_player):
+        action, res = move
+        # moving actions
+        if isinstance(action, MoveAction):
+            # how “forward” is the landing row?
+            # frogs want to maximize r, opponents minimize r
+            dist = res.r if current_player == BitBoard.FROG else (BOARD_N - 1 - res.r)
+            return dist
+        # growing is valuable early on (when few lilies exist)
+        elif isinstance(action, GrowAction):
+            return 0.5
+        else:
+            return 0.0
+
     def rollout_policy(self, possible_moves):
+        # compute raw scores
+        eps = 0.2  # 80% follow “best” move, 20% pick random
+        if np.random.rand() < eps:
+            return possible_moves[np.random.randint(len(possible_moves))]
+
+        best = max(possible_moves, key=lambda mv: self.state._move_priority(mv))
+
+        return best
+        #
+        # scores = [
+        #     self.heuristic_score(mv, self.state.get_current_player())
+        #     for mv in possible_moves
+        # ]
+        # # shift to all‑positive and softmax
+        # exp_scores = np.exp(np.array(scores) / 0.5)  # 0.5 is the temperature
+        #
+        # probs = exp_scores / exp_scores.sum()
+        # idx = np.random.choice(len(possible_moves), p=probs)
+        # return possible_moves[idx]
+
         return possible_moves[np.random.randint(len(possible_moves))]
 
     def _tree_policy(self):
@@ -92,13 +140,16 @@ class MonteCarloTreeSearchNode:
                 current_node = current_node.best_child()
         return current_node
 
-    def best_action(self, simulation_no=100):
+    def best_action(self, simulation_no=50):
+        if not self.children and self._untried_actions:
+            self.expand()
+
         for _ in range(simulation_no):
             v = self._tree_policy()
             reward = v.rollout()
             v.backpropagate(reward)
 
-        best = self.best_child(c_param=0.0)
+        best = self.best_child()
         return {
             "action": best.parent_action[0],
             "res": best.parent_action[1],

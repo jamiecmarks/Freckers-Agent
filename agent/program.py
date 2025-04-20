@@ -7,6 +7,7 @@ import random
 from .internal_state import FreckersState
 from .bitboard import BitBoard
 from .mcts import MonteCarloTreeSearchNode
+from referee.game.constants import MAX_TURNS
 
 
 class Agent:
@@ -22,6 +23,7 @@ class Agent:
         """
         self._color = color
 
+        self.total_moves = 0
         bitboard = BitBoard()
 
         self.test_count = 0
@@ -46,19 +48,12 @@ class Agent:
         if self.test_count < 75:
             self.test_count += 1
             print("Testing MCTS")
-            action_out = self.root.best_action()
-            # self.root.state.toggle_player()
+            action_out = self.root.best_action(
+                100
+            )  # simulate only as many moves as possible
 
             # print(action_out["res_node"].state.get_board())
             return action_out["action"]
-
-        match self._color:
-            case PlayerColor.RED:
-                print("Testing: RED is playing a MOVE action")
-                return MoveAction(Coord(0, 3), [Direction.Down])
-            case PlayerColor.BLUE:
-                print("Testing: BLUE is playing a GROW action")
-                return GrowAction()
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """
@@ -71,13 +66,7 @@ class Agent:
         # action for demonstration purposes. You should replace this with your
         # own logic to update your agent's internal game state representation.
 
-        # for children in self.root.children:
-        #     print(children.state.get_board())
-        #     print(children.parent_action[0], action)
-        #     if action == children.parent_action[0]:
-        #         print("OY FOUND OY")
-        #         break
-
+        self.total_moves += 1
         child = self.root.find_child(action)
 
         if child is not None:
@@ -90,14 +79,3 @@ class Agent:
             child = MonteCarloTreeSearchNode(new_board)
 
         self.root = child
-
-        match action:
-            case MoveAction(coord, dirs):
-                dirs_text = ", ".join([str(dir) for dir in dirs])
-                print(f"Testing: {color} played MOVE action:")
-                print(f"  Coord: {coord}")
-                print(f"  Directions: {dirs_text}")
-            case GrowAction():
-                print(f"Testing: {color} played GROW action")
-            case _:
-                raise ValueError(f"Unknown action type: {action}")
