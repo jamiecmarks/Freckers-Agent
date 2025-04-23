@@ -50,7 +50,7 @@ class MonteCarloTreeSearchNode:
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 10
+        max_depth = 100
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
@@ -82,7 +82,7 @@ class MonteCarloTreeSearchNode:
     def rollout1(self):
         # current_rollout_state = self.state
         current_rollout = self
-        max_depth = 20
+        max_depth = 30
         depth = 0
 
         while not current_rollout.is_terminal_node() and max_depth > depth:
@@ -105,9 +105,24 @@ class MonteCarloTreeSearchNode:
             for r in range(BOARD_N):
                 for c in range(BOARD_N):
                     if board[r][c] == self.state.get_current_player():
-                        score += r
+                        match self.state.get_current_player():
+                            case BitBoard.FROG:
+                                score += r
+                                break
+                            case BitBoard.OPPONENT:
+                                score += BOARD_N - 1 - r
+                                break
                     elif board[r][c] not in (BitBoard.LILLY, BitBoard.EMPTY):
-                        score -= BOARD_N - 1 - r
+                        match self.state.get_current_player():
+                            case BitBoard.FROG:
+                                score -= BOARD_N - 1 - r
+                                break
+                            case BitBoard.OPPONENT:
+                                score -= r
+                                break
+                        score -= (
+                            BOARD_N - 1 - r
+                        )  # still an error here, not calculated coorectl
             return 1 if score > 0 else (-1 if score < 0 else 0)
         # else:
         #     print(f"I am {self.state.get_current_player()}")
@@ -138,7 +153,7 @@ class MonteCarloTreeSearchNode:
             else:
                 mult = 1
                 if isinstance(c.parent_action[0], GrowAction):
-                    mult = 1
+                    mult = 1.05
                 else:
                     start = c.parent_action[0].coord.r
                     res = c.parent_action[1].r
@@ -149,8 +164,9 @@ class MonteCarloTreeSearchNode:
                         #     choices_weights.append(mult)
                         #     continue
                         mult += (
-                            0.5 * dist
+                            0.1 * dist
                         )  # if we can get a sick multijump thing lets prioritize that
+                        # pass
                 choices_weights.append(
                     mult
                     * (
