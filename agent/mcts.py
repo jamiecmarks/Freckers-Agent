@@ -138,19 +138,19 @@ class MonteCarloTreeSearchNode:
             else:
                 mult = 1
                 if isinstance(c.parent_action[0], GrowAction):
-                    mult = 1.2
+                    mult = 1
                 else:
                     start = c.parent_action[0].coord.r
                     res = c.parent_action[1].r
                     dist = abs(start - res)
                     if dist > 1:
-                        # print(c.parent_action[0], dist)
-                        mult = float("inf")
-                        choices_weights.append(mult)
-                        continue
-                        # mult += (
-                        #     2 * dist
-                        # )  # if we can get a sick multijump thing lets prioritize that
+                        #     # print(c.parent_action[0], dist)
+                        # mult = float("inf")
+                        #     choices_weights.append(mult)
+                        #     continue
+                        mult += (
+                            0.5 * dist
+                        )  # if we can get a sick multijump thing lets prioritize that
                 choices_weights.append(
                     mult
                     * (
@@ -216,7 +216,7 @@ class MonteCarloTreeSearchNode:
 
         return children[np.argmax(num_visited)]
 
-    def best_action(self, simulation_no=75):
+    def best_action(self, simulation_no=50):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
