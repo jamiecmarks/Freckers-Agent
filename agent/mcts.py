@@ -2,8 +2,8 @@ import numpy as np
 from collections import defaultdict
 from .bitboard import BitBoard
 from referee.game.actions import GrowAction, MoveAction
-from referee.game.coord import Coord
 from referee.game.constants import BOARD_N
+from referee.game.coord import Coord
 
 
 class MonteCarloTreeSearchNode:
@@ -32,13 +32,16 @@ class MonteCarloTreeSearchNode:
     def expand(self):
         # action_res = self._untried_actions.pop()
         idx = np.random.randint(len(self._untried_actions))
+
         action_res = self._untried_actions.pop(idx)
         action, res = action_res
         next_state = self.state.move(action, res)
         next_state.toggle_player()
+
         child_node = MonteCarloTreeSearchNode(
             next_state, parent=self, parent_action=action_res
         )
+
         self.children.append(child_node)
         return child_node
 
@@ -47,13 +50,15 @@ class MonteCarloTreeSearchNode:
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 20
+        max_depth = 50
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
             possible_moves = current_rollout_state.get_all_moves()
+
             if not possible_moves:
                 break
+
             action = self.rollout_policy(possible_moves)
             current_rollout_state = current_rollout_state.move(action[0], action[1])
             current_rollout_state.toggle_player()
@@ -77,6 +82,7 @@ class MonteCarloTreeSearchNode:
     def backpropagate(self, result):
         self._number_of_visits += 1
         self._results[result] += 1
+
         if self.parent:
             self.parent.backpropagate(-result)
 
@@ -117,6 +123,7 @@ class MonteCarloTreeSearchNode:
         best = max(possible_moves, key=lambda mv: self.state._move_priority(mv))
 
         return best
+
         #
         # scores = [
         #     self.heuristic_score(mv, self.state.get_current_player())
@@ -133,16 +140,16 @@ class MonteCarloTreeSearchNode:
 
     def _tree_policy(self):
         current_node = self
-        while not current_node.is_terminal_node():
-            if not current_node.is_fully_expanded():
-                return current_node.expand()
-            else:
-                current_node = current_node.best_child()
+        # while not current_node.is_terminal_node():
+        if not current_node.is_fully_expanded():
+            return current_node.expand()
+        else:
+            current_node = current_node.best_child()
         return current_node
 
-    def best_action(self, simulation_no=50):
-        if not self.children and self._untried_actions:
-            self.expand()
+    def best_action(self, simulation_no=150):
+        # if not self.children and self._untried_actions:
+        #     self.expand()
 
         for _ in range(simulation_no):
             v = self._tree_policy()
