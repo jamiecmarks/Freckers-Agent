@@ -84,7 +84,7 @@ class MonteCarloTreeSearchNode(Strategy):
     def rollout1(self):
         # current_rollout_state = self.state
         current_rollout = self
-        max_depth = 30
+        max_depth = 20 if self.n() < 80 else 40
         depth = 0
 
         while not current_rollout.is_terminal_node() and max_depth > depth:
@@ -144,8 +144,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def dynamic_c(self):
         # start exploratory, then exploit more later
-        alpha = 1
-        return self.c / (1 + alpha * np.log(1 + self.n()))
+        return self.c / (1 + np.log(1 + self.n()))
 
     def best_child(self):
         # chooose_rand = len(self._untried_actions)
@@ -160,27 +159,27 @@ class MonteCarloTreeSearchNode(Strategy):
             else:
                 mult = 1
                 if isinstance(c.parent_action[0], GrowAction):
-                    mult += 0.2 / c.n()
+                    mult += 0.2 if self.n() < 50 else -0.2
                 else:
-                    start = c.parent_action[0].coord.r
-                    res = c.parent_action[1].r
-                    dist = abs(start - res)
-                    if dist > 1:
-                        #     # print(c.parent_action[0], dist)
-                        # mult = float("inf")
-                        #     choices_weights.append(mult)
-                        #     continue
-                        mult += (
-                            0.2 * dist
-                        )  # if we can get a sick multijump thing lets prioritize that
-                        # pass
-                    elif dist == 0:
-                        mult -= 0.5
+                    start_r = c.parent_action[0].coord.r
+                    end_r = c.parent_action[1].r
+                    start_c = c.parent_action[0].coord.c
+                    end_c = c.parent_action[1].c
+                    vert_dist = abs(start_r - end_r)
+                    if vert_dist > 1:
+                        mult += 0.2 * vert_dist
+                    elif vert_dist == 0:
+                        mult -= 0.2
+                    midboard = BOARD_N - 1 // 2
+                    if abs(start_c - midboard) > abs(end_c - midboard):
+                        # moving towards the middle is good
+                        mult += 0.1
+
                 choices_weights.append(
                     mult
                     * (
                         (c.q() / c.n())
-                        + self.dynamic_c() * np.sqrt((2 * np.log(self.n()) / c.n()))
+                        + self.c * np.sqrt((2 * np.log(self.n()) / c.n()))
                     )
                 )
         return self.children[np.argmax(choices_weights)]
@@ -241,7 +240,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
         return children[np.argmax(num_visited)]
 
-    def best_action(self, simulation_no=70):
+    def best_action(self, simulation_no=150):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
