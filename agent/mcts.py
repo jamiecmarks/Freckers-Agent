@@ -18,6 +18,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[1] = 0
         self._results[-1] = 0
         self._untried_actions = self.untried_actions()
+        self.c = 1.0
 
     def untried_actions(self):
         return self.state.get_all_moves()
@@ -83,7 +84,7 @@ class MonteCarloTreeSearchNode(Strategy):
     def rollout1(self):
         # current_rollout_state = self.state
         current_rollout = self
-        max_depth = 40
+        max_depth = 30
         depth = 0
 
         while not current_rollout.is_terminal_node() and max_depth > depth:
@@ -141,7 +142,12 @@ class MonteCarloTreeSearchNode(Strategy):
     def is_fully_expanded(self):
         return len(self._untried_actions) == 0
 
-    def best_child(self, c_param=0.25):
+    def dynamic_c(self):
+        # start exploratory, then exploit more later
+        alpha = 1
+        return self.c / (1 + alpha * np.log(1 + self.n()))
+
+    def best_child(self):
         # chooose_rand = len(self._untried_actions)
         choices_weights = []
         for c in self.children:
@@ -154,7 +160,7 @@ class MonteCarloTreeSearchNode(Strategy):
             else:
                 mult = 1
                 if isinstance(c.parent_action[0], GrowAction):
-                    mult = 1.05
+                    mult += 0.2 / c.n()
                 else:
                     start = c.parent_action[0].coord.r
                     res = c.parent_action[1].r
@@ -165,14 +171,16 @@ class MonteCarloTreeSearchNode(Strategy):
                         #     choices_weights.append(mult)
                         #     continue
                         mult += (
-                            0.1 * dist
+                            0.2 * dist
                         )  # if we can get a sick multijump thing lets prioritize that
                         # pass
+                    elif dist == 0:
+                        mult -= 0.5
                 choices_weights.append(
                     mult
                     * (
                         (c.q() / c.n())
-                        + c_param * np.sqrt((2 * np.log(self.n()) / c.n()))
+                        + self.dynamic_c() * np.sqrt((2 * np.log(self.n()) / c.n()))
                     )
                 )
         return self.children[np.argmax(choices_weights)]
