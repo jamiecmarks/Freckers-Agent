@@ -7,6 +7,7 @@ import random
 from .bitboard import BitBoard
 from .mcts import MonteCarloTreeSearchNode
 from referee.game.constants import MAX_TURNS
+from .random_strat import RandomStrat
 
 
 class Agent:
@@ -25,7 +26,14 @@ class Agent:
         self.total_moves = 0
         bitboard = BitBoard()
 
-        self.root = MonteCarloTreeSearchNode(bitboard)
+        match color:
+            case PlayerColor.BLUE:
+                bitboard.toggle_player()
+                self.root = RandomStrat(bitboard)
+
+            case PlayerColor.RED:
+                self.root = MonteCarloTreeSearchNode(bitboard)
+                # bitboard.current_player = bitboard.OPPONENT
 
     def action(self, **referee: dict) -> Action:
         """
@@ -54,8 +62,16 @@ class Agent:
         # action for demonstration purposes. You should replace this with your
         # own logic to update your agent's internal game state representation.
 
-        self.total_moves += 1
-        child = self.root.find_child(action)
+        if (
+            isinstance(action, GrowAction)
+            and self._color == PlayerColor.BLUE
+            and color == PlayerColor.RED
+        ):
+            self.root.state.toggle_player()
+            child = self.root.find_child(action)
+            child.state.toggle_player()
+        else:
+            child = self.root.find_child(action)
 
         if child is not None:
             print("Found child")

@@ -4,9 +4,10 @@ from .bitboard import BitBoard
 from referee.game.actions import GrowAction, MoveAction
 from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
+from .strategy import Strategy
 
 
-class MonteCarloTreeSearchNode:
+class MonteCarloTreeSearchNode(Strategy):
     def __init__(self, state: BitBoard, parent=None, parent_action=None):
         self.state = state
         self.parent = parent
@@ -82,7 +83,7 @@ class MonteCarloTreeSearchNode:
     def rollout1(self):
         # current_rollout_state = self.state
         current_rollout = self
-        max_depth = 30
+        max_depth = 40
         depth = 0
 
         while not current_rollout.is_terminal_node() and max_depth > depth:
@@ -232,7 +233,7 @@ class MonteCarloTreeSearchNode:
 
         return children[np.argmax(num_visited)]
 
-    def best_action(self, simulation_no=50):
+    def best_action(self, simulation_no=70):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
@@ -252,5 +253,3 @@ class MonteCarloTreeSearchNode:
         for child in self.children:
             if child.parent_action[0] == action:
                 return child
-
-        return None
