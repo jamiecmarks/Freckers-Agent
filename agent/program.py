@@ -25,12 +25,6 @@ class Agent:
         self.total_moves = 0
         bitboard = BitBoard()
 
-        self.test_count = 0
-        match color:
-            case PlayerColor.RED:
-                print("Testing: I am playing as RED")
-            case PlayerColor.BLUE:
-                print("Testing: I am playing as BLUE")
         self.root = MonteCarloTreeSearchNode(bitboard)
 
     def action(self, **referee: dict) -> Action:
@@ -44,15 +38,10 @@ class Agent:
         # the initial moves of the game, so you should use some game playing
         # technique(s) to determine the best action to take.
 
-        if self.test_count < 75:
-            self.test_count += 1
-            print("Testing MCTS")
-            action_out = self.root.best_action(
-                100
-            )  # simulate only as many moves as possible
+        action_out = self.root.best_action()  # simulate only as many moves as possible
 
-            # print(action_out["res_node"].state.get_board())
-            return action_out["action"]
+        # print(action_out["res_node"].state.get_board())
+        return action_out["action"]
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """

@@ -50,7 +50,7 @@ class MonteCarloTreeSearchNode:
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 10
+        max_depth = 150
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
@@ -104,11 +104,14 @@ class MonteCarloTreeSearchNode:
             board = current_rollout.state.get_board()
             for r in range(BOARD_N):
                 for c in range(BOARD_N):
-                    if board[r][c] == current_rollout.state.FROG:
+                    if board[r][c] == self.state.get_current_player():
                         score += r
-                    elif board[r][c] == current_rollout.state.OPPONENT:
+                    elif board[r][c] != BitBoard.LILLY:
                         score -= BOARD_N - 1 - r
             return 1 if score > 0 else (-1 if score < 0 else 0)
+        # else:
+        #     print(f"I am {self.state.get_current_player()}")
+        #     print(current_rollout.state.get_board())
 
         return current_rollout.state.get_winner()
 
@@ -193,7 +196,7 @@ class MonteCarloTreeSearchNode:
 
         return children[np.argmax(num_visited)]
 
-    def best_action(self, simulation_no=500):
+    def best_action(self, simulation_no=50):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
