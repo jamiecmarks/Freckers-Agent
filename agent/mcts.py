@@ -50,7 +50,7 @@ class MonteCarloTreeSearchNode:
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 150
+        max_depth = 100
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
@@ -196,7 +196,7 @@ class MonteCarloTreeSearchNode:
 
         return children[np.argmax(num_visited)]
 
-    def best_action(self, simulation_no=50):
+    def best_action(self, simulation_no=75):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
