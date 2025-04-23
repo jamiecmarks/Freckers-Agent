@@ -50,7 +50,7 @@ class MonteCarloTreeSearchNode:
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 100
+        max_depth = 10
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
@@ -125,18 +125,38 @@ class MonteCarloTreeSearchNode:
     def is_fully_expanded(self):
         return len(self._untried_actions) == 0
 
-    def best_child(self, c_param=0.125):
+    def best_child(self, c_param=0.25):
         # chooose_rand = len(self._untried_actions)
         choices_weights = []
         for c in self.children:
             if c.is_terminal_node():
                 return c
+
             if c.n() == 0:
                 choices_weights.append(float("inf"))  # prioritize unvisited nodes
                 # choices_weights.append(c.q() / c.n())
             else:
+                mult = 1
+                if isinstance(c.parent_action[0], GrowAction):
+                    mult = 1.2
+                else:
+                    start = c.parent_action[0].coord.r
+                    res = c.parent_action[1].r
+                    dist = abs(start - res)
+                    if dist > 1:
+                        # print(c.parent_action[0], dist)
+                        mult = float("inf")
+                        choices_weights.append(mult)
+                        continue
+                        # mult += (
+                        #     2 * dist
+                        # )  # if we can get a sick multijump thing lets prioritize that
                 choices_weights.append(
-                    (c.q() / c.n()) + c_param * np.sqrt((2 * np.log(self.n()) / c.n()))
+                    mult
+                    * (
+                        (c.q() / c.n())
+                        + c_param * np.sqrt((2 * np.log(self.n()) / c.n()))
+                    )
                 )
         return self.children[np.argmax(choices_weights)]
 
