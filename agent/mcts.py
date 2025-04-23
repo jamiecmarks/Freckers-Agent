@@ -58,7 +58,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 100
+        max_depth = 20 if self.depth < 80 else 40
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
