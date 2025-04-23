@@ -106,7 +106,7 @@ class MonteCarloTreeSearchNode:
                 for c in range(BOARD_N):
                     if board[r][c] == self.state.get_current_player():
                         score += r
-                    elif board[r][c] != BitBoard.LILLY:
+                    elif board[r][c] not in (BitBoard.LILLY, BitBoard.EMPTY):
                         score -= BOARD_N - 1 - r
             return 1 if score > 0 else (-1 if score < 0 else 0)
         # else:
