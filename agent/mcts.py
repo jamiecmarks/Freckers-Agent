@@ -50,7 +50,7 @@ class MonteCarloTreeSearchNode:
 
     def rollout(self):
         current_rollout_state = self.state
-        max_depth = 50
+        max_depth = 10
         depth = 0
 
         while not current_rollout_state.is_game_over() and max_depth > depth:
@@ -79,6 +79,39 @@ class MonteCarloTreeSearchNode:
 
         return current_rollout_state.get_winner()
 
+    def rollout1(self):
+        # current_rollout_state = self.state
+        current_rollout = self
+        max_depth = 20
+        depth = 0
+
+        while not current_rollout.is_terminal_node() and max_depth > depth:
+            curr_player = current_rollout.state.get_current_player()
+            current_rollout = current_rollout._tree_policy()
+            if current_rollout.state.get_current_player() == curr_player:
+                current_rollout.state.toggle_player()
+
+            #     current_rollout = current_rollout.best_child()
+            #     action = current_rollout.parent_action()
+            #     # current_rollout_state = current_rollout_state.move(action[0], action[1])
+            #     current_rollout.state.toggle_player()
+            depth += 1
+
+        # didn't reach a terminal state
+        if not current_rollout.is_terminal_node():
+            # positive = good for current player, negative otherwise
+            score = 0
+            board = current_rollout.state.get_board()
+            for r in range(BOARD_N):
+                for c in range(BOARD_N):
+                    if board[r][c] == current_rollout.state.FROG:
+                        score += r
+                    elif board[r][c] == current_rollout.state.OPPONENT:
+                        score -= BOARD_N - 1 - r
+            return 1 if score > 0 else (-1 if score < 0 else 0)
+
+        return current_rollout.state.get_winner()
+
     def backpropagate(self, result):
         self._number_of_visits += 1
         self._results[result] += 1
@@ -90,10 +123,14 @@ class MonteCarloTreeSearchNode:
         return len(self._untried_actions) == 0
 
     def best_child(self, c_param=0.125):
+        # chooose_rand = len(self._untried_actions)
         choices_weights = []
         for c in self.children:
+            if c.is_terminal_node():
+                return c
             if c.n() == 0:
                 choices_weights.append(float("inf"))  # prioritize unvisited nodes
+                # choices_weights.append(c.q() / c.n())
             else:
                 choices_weights.append(
                     (c.q() / c.n()) + c_param * np.sqrt((2 * np.log(self.n()) / c.n()))
@@ -116,6 +153,7 @@ class MonteCarloTreeSearchNode:
 
     def rollout_policy(self, possible_moves):
         # compute raw scores
+        #
         eps = 0.2  # 80% follow “best” move, 20% pick random
         if np.random.rand() < eps:
             return possible_moves[np.random.randint(len(possible_moves))]
@@ -147,16 +185,24 @@ class MonteCarloTreeSearchNode:
             current_node = current_node.best_child()
         return current_node
 
-    def best_action(self, simulation_no=150):
+    def choose_next_action(self):
+        children = self.children
+        num_visited = []
+        for child in children:
+            num_visited.append(child.n())
+
+        return children[np.argmax(num_visited)]
+
+    def best_action(self, simulation_no=500):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
         for _ in range(simulation_no):
             v = self._tree_policy()
-            reward = v.rollout()
+            reward = v.rollout1()
             v.backpropagate(reward)
 
-        best = self.best_child()
+        best = self.choose_next_action()
         return {
             "action": best.parent_action[0],
             "res": best.parent_action[1],
