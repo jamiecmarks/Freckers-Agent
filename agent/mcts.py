@@ -1,3 +1,4 @@
+import random
 import numpy as np
 from collections import defaultdict
 from .bitboard import BitBoard
@@ -19,6 +20,11 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._untried_actions = self.untried_actions()
         self.c = 1.0
+
+        if parent:
+            self.depth = parent.depth + 1
+        else:
+            self.depth = 0
 
     def untried_actions(self):
         return self.state.get_all_moves()
@@ -84,7 +90,7 @@ class MonteCarloTreeSearchNode(Strategy):
     def rollout1(self):
         # current_rollout_state = self.state
         current_rollout = self
-        max_depth = 20 if self.n() < 80 else 45
+        max_depth = 20 if self.depth < 80 else 40
         depth = 0
 
         while not current_rollout.is_terminal_node() and max_depth > depth:
@@ -159,7 +165,7 @@ class MonteCarloTreeSearchNode(Strategy):
             else:
                 mult = 1
                 if isinstance(c.parent_action[0], GrowAction):
-                    mult += 0.2 if self.n() < 50 else -0.2
+                    mult += 0.2 if self.depth < 15 and self.depth > 2 else -0.2
                 else:
                     start_r = c.parent_action[0].coord.r
                     end_r = c.parent_action[1].r
@@ -170,10 +176,10 @@ class MonteCarloTreeSearchNode(Strategy):
                         mult += 0.2 * vert_dist
                     elif vert_dist == 0:
                         mult -= 0.2
-                    midboard = BOARD_N - 1 // 2
+                    midboard = (BOARD_N - 1) // 2
                     if abs(start_c - midboard) > abs(end_c - midboard):
                         # moving towards the middle is good
-                        mult += 0.1
+                        mult += 0.2 if self.depth < 25 else 0
 
                 choices_weights.append(
                     mult
@@ -182,7 +188,9 @@ class MonteCarloTreeSearchNode(Strategy):
                         + self.c * np.sqrt((2 * np.log(self.n()) / c.n()))
                     )
                 )
-        return self.children[np.argmax(choices_weights)]
+        max_val = max(choices_weights)
+        all_max = [i for i, v in enumerate(choices_weights) if v == max_val]
+        return self.children[random.choice(all_max)]
 
     def heuristic_score(self, move, current_player):
         action, res = move
