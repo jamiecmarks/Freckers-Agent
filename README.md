@@ -19,8 +19,7 @@ Also there is a strong bias for multi-jumps during the whole game. It seems to w
 
 1. Check out the Strat class and the RandomStrat in the `rangomagent` folder. Maybe implement other strats if you wanna try them out. Weighted random would be good and also just using the count heuristic thing in mcts.
 
-To run the mcts agent against the random agent you should change the current .
-You just need to run
+To run the mcts agent against the random agent you just need to run
 ```bash
 python -m referee randomagent agent
 ```
