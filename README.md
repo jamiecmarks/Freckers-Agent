@@ -17,7 +17,14 @@ Also there is a strong bias for multi-jumps during the whole game. It seems to w
 
 1. Check out dynamic_c, this is a function that changes the c value based on how far we are into the game. 
 
-1. Check out the Strat class and the RandomStrat. Maybe implement other strats if you wanna try them out. Weighted random would be good and also just using the count heuristic thing in mcts.
+1. Check out the Strat class and the RandomStrat in the `rangomagent` folder. Maybe implement other strats if you wanna try them out. Weighted random would be good and also just using the count heuristic thing in mcts.
 
-To run the mcts agent against the random agent you should change the current `program.py` to a different placeholder name like `Oprogram.py` and the rename `Rprogram.py` to just `program.py` and then run and the mcts agent will be red and the random agent will be blue.
-Ik this is a bit clunky but idrk how to do it better. Just because I think we would have to make a new module for each agent? Which is a headache. So this is how it works now.
+To run the mcts agent against the random agent you should change the current .
+You just need to run
+```bash
+python -m referee randomagent agent
+```
+
+Here red will be a random agent and blue will be mcts, just swap arguments to change order.
+
+1. Although I've tried to make it smarter. In the start of the game it kind of plays like the random agent. Doesn't seem to smart. Maybe check that out
