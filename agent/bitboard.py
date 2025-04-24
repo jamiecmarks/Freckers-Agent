@@ -4,6 +4,9 @@ from referee.game.coord import Coord, Direction
 from referee.game.constants import BOARD_N
 import math
 from scipy.spatial import ConvexHull
+import numpy as np
+from itertools import combinations
+from math import exp
 
 class BitBoard:
     LILLY = 0b01
@@ -312,35 +315,41 @@ class BitBoard:
                         BOARD_N - 1 - r
                     )  # still an error here, not calculated coorectl
         score = scaled_sigmoid(score, input_range = 10)
-        cluster_score = self.find_mean_loc()
+        cluster_score = self.clustering_score()
         
-        weighted_score = (3 * score + skip_advantage + cluster_score)/5
+        weighted_score = (5 * score + 3*skip_advantage + cluster_score)/9
+        # print(weighted_score)
+        # print(self.render())
         if weighted_score > 0.5:
             return 1
         return -1
         # Clustering level?
 
 
-
-    def find_mean_loc(self, ideal_score = 5, sigma =7):
+    def get_coordinates(self):
         board = self.get_board()
         coordinates = []
-        unique_x = []; unique_y = []
         for r in range(BOARD_N):
             for c in range(BOARD_N):
                 if board[r][c] == self.current_player:
-                    if r not in unique_x:
-                        unique_x.append(r)
-                    if c not in unique_y:
-                        unique_y.append(c)
                     coordinates.append((r,c))
-        if len(unique_x)<2 or len(unique_y)<2:
-            return 0
-        hull = ConvexHull(coordinates)
-        area = hull.area
-        score = 1 - math.exp(-((area - ideal_score) ** 2) / (2 * sigma ** 2))
+        return coordinates
 
-        return score
+    def clustering_score(self, ideal_dist=2, sigma=0.5):
+        coords = self.get_coordinates()
+        # Calculate the centroid of the points (mean of coordinates)
+        centroid = np.mean(coords, axis=0)
+        # Calculate the Manhattan distance from each point to the centroid
+        distances = [np.abs(np.array(p) - centroid).sum() for p in coords]
+        avg_dist_to_centroid = np.mean(distances)
+        # Gaussian penalty for the difference from the ideal distance
+        penalty = ((avg_dist_to_centroid - ideal_dist) ** 2) / (2 * sigma ** 2)
+        
+        # Compute the score using the Gaussian function
+        score = np.exp(-penalty)
+        # Clamp the score to be between 0 and 1
+        return max(0, min(1, score))
+
 
 
 

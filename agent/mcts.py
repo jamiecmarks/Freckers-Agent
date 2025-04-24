@@ -7,9 +7,11 @@ from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
 
-LATE_DEPTH = 40
-EARLY_DEPTH = 20
-DEPTH_THRESHOLD = 80
+LATE_DEPTH = 10
+EARLY_DEPTH = 10
+DEPTH_THRESHOLD = 60
+SIMULATIONS = 150
+
 class MonteCarloTreeSearchNode(Strategy):
     def __init__(self, state: BitBoard, parent=None, parent_action=None):
         self.state = state
@@ -58,36 +60,6 @@ class MonteCarloTreeSearchNode(Strategy):
     def is_terminal_node(self):
         return self.state.is_game_over()
 
-    def rollout(self):
-        current_rollout_state = self.state
-        max_depth = 20 if self.depth < 80 else 40
-        depth = 0
-
-        while not current_rollout_state.is_game_over() and max_depth > depth:
-            possible_moves = current_rollout_state.get_all_moves()
-
-            if not possible_moves:
-                break
-
-            action = self.rollout_policy(possible_moves)
-            current_rollout_state = current_rollout_state.move(action[0], action[1])
-            current_rollout_state.toggle_player()
-            depth += 1
-
-        # didn't reach a terminal state
-        if not current_rollout_state.is_game_over():
-            # positive = good for current player, negative otherwise
-            score = 0
-            board = current_rollout_state.get_board()
-            for r in range(BOARD_N):
-                for c in range(BOARD_N):
-                    if board[r][c] == current_rollout_state.FROG:
-                        score += r
-                    elif board[r][c] == current_rollout_state.OPPONENT:
-                        score -= BOARD_N - 1 - r
-            return 1 if score > 0 else (-1 if score < 0 else 0)
-
-        return current_rollout_state.get_winner()
 
     def rollout1(self):
         # current_rollout_state = self.state
@@ -112,10 +84,11 @@ class MonteCarloTreeSearchNode(Strategy):
 
         # didn't reach a terminal state
         if not current_rollout.is_terminal_node():
+            if current_rollout.state.get_current_player!=self.state.get_current_player:
+                current_rollout.state.toggle_player()
             return current_rollout.state.evaluate_position()
 
         return current_rollout.state.get_winner()
-
 
 
 
@@ -241,7 +214,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
         return children[np.argmax(num_visited)]
 
-    def best_action(self, simulation_no=100):
+    def best_action(self, simulation_no=SIMULATIONS):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
