@@ -6,11 +6,12 @@ from referee.game.actions import GrowAction, MoveAction
 from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
+import random 
 
-LATE_DEPTH = 10
-EARLY_DEPTH = 10
+LATE_DEPTH = 150
+EARLY_DEPTH = 150
 DEPTH_THRESHOLD = 60
-SIMULATIONS = 150
+SIMULATIONS = 60
 
 class MonteCarloTreeSearchNode(Strategy):
     def __init__(self, state: BitBoard, parent=None, parent_action=None):
@@ -62,34 +63,46 @@ class MonteCarloTreeSearchNode(Strategy):
 
 
     def rollout1(self):
-        # current_rollout_state = self.state
-        current_rollout = self
+
+        current_rollout = self.state
         max_depth = EARLY_DEPTH if self.depth < DEPTH_THRESHOLD else LATE_DEPTH
         depth = 0
-
-        while not current_rollout.is_terminal_node() and max_depth > depth:
-            if current_rollout.depth > 75:
+        while (not current_rollout.is_game_over()) and (max_depth > depth):
+            if depth > 75:
                 break
 
-            curr_player = current_rollout.state.get_current_player()
-            current_rollout = current_rollout._tree_policy()
-            if current_rollout.state.get_current_player() == curr_player:
-                current_rollout.state.toggle_player()
+            move_values = []
+            curr_player = current_rollout.get_current_player()
+            legal_moves = current_rollout.get_all_moves()
+            total_moves = len(legal_moves)
+            
+            for move in legal_moves:
+                result = current_rollout.move(move[0], move[1])
+                score = result.quick_eval(move, total_moves)
+                move_values.append((score, move))
 
-            #     current_rollout = current_rollout.best_child()
-            #     action = current_rollout.parent_action()
-            #     # current_rollout_state = current_rollout_state.move(action[0], action[1])
-            #     current_rollout.state.toggle_player()
+            # Make all scores positive by shifting if needed
+            min_score = min(score for score, _ in move_values)
+            weights = [(score - min_score + 1e-3) for score, _ in move_values]
+
+            # Weighted random choice
+            chosen_move = random.choices([m for _, m in move_values], weights=weights, k=1)[0]
+            next_move_mv, next_move_res = chosen_move
+
+            current_rollout = current_rollout.move(next_move_mv, next_move_res)
+            
+            if current_rollout.get_current_player() == curr_player:
+                current_rollout.toggle_player()
+
             depth += 1
 
         # didn't reach a terminal state
-        if not current_rollout.is_terminal_node():
-            if current_rollout.state.get_current_player!=self.state.get_current_player:
-                current_rollout.state.toggle_player()
-            return current_rollout.state.evaluate_position()
-
-        return current_rollout.state.get_winner()
-
+        if not current_rollout.is_game_over():
+            if current_rollout.get_current_player!=self.state.get_current_player:
+                current_rollout.toggle_player()
+            return current_rollout.evaluate_position()
+        return current_rollout.get_winner()
+        
 
 
 
@@ -183,27 +196,12 @@ class MonteCarloTreeSearchNode(Strategy):
 
         return best
 
-        #
-        # scores = [
-        #     self.heuristic_score(mv, self.state.get_current_player())
-        #     for mv in possible_moves
-        # ]
-        # # shift to all‑positive and softmax
-        # exp_scores = np.exp(np.array(scores) / 0.5)  # 0.5 is the temperature
-        #
-        # probs = exp_scores / exp_scores.sum()
-        # idx = np.random.choice(len(possible_moves), p=probs)
-        # return possible_moves[idx]
-
-        return possible_moves[np.random.randint(len(possible_moves))]
-
     def _tree_policy(self):
         current_node = self
-        # while not current_node.is_terminal_node():
-        if not current_node.is_fully_expanded():
-            return current_node.expand()
-        else:
+        while current_node.is_fully_expanded():
             current_node = current_node.best_child()
+        current_node = current_node.expand()
+
         return current_node
 
     def choose_next_action(self):

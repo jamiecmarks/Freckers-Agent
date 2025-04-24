@@ -206,6 +206,18 @@ class BitBoard:
         return delta
 
 
+    def quick_eval(self, move, total_moves):
+        if isinstance(move[0], GrowAction):
+            if total_moves < 8:
+                return ((8-total_moves))**2+1
+            return 1
+        start = move[0].coord.r
+        end = move[1].r
+        distance_covered  = start - end
+        if self.current_player == BitBoard.FROG:
+            distance_covered = -distance_covered
+
+        return distance_covered
 
 
     
@@ -267,7 +279,7 @@ class BitBoard:
                     adjacent.append(Coord(next_r, next_c))
         return len(adjacent)
     
-    def evaluate_position(self):
+    def evaluate_position(self, continuous = False):
         """ Heuristic function that figures out 
             whether a move is generally better for 
             a given side
@@ -317,9 +329,11 @@ class BitBoard:
         score = scaled_sigmoid(score, input_range = 10)
         cluster_score = self.clustering_score()
         
-        weighted_score = (5 * score + 3*skip_advantage + cluster_score)/9
+        weighted_score = (2 * score + skip_advantage)/3
         # print(weighted_score)
         # print(self.render())
+        if continuous:
+            return weighted_score
         if weighted_score > 0.5:
             return 1
         return -1
