@@ -148,7 +148,16 @@ class MonteCarloTreeSearchNode(Strategy):
                 next_state.toggle_player()
                 next_states[next_state] = next_state.evaluate_position()
 
-            state = max(next_states, key=lambda x: next_states[x])
+            raw = next_states.values()
+            offset = -min(raw) if min(raw) < 0 else 0
+            adjusted = [s + offset for s in raw]
+            total = sum(adjusted)
+            if total == 0:
+                probs = [1 / len(raw)] * len(raw)
+            else:
+                probs = [a / total for a in adjusted]
+
+            state = random.choices(list(next_states.keys()), weights=probs)[0]
             # action, res = self.rollout_policy(state, depth=self.depth + depth // 2)
             # state = state.move(action, res)
             # state.toggle_player()
