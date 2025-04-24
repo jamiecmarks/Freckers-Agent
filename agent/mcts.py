@@ -7,7 +7,9 @@ from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
 
-
+LATE_DEPTH = 40
+EARLY_DEPTH = 20
+DEPTH_THRESHOLD = 80
 class MonteCarloTreeSearchNode(Strategy):
     def __init__(self, state: BitBoard, parent=None, parent_action=None):
         self.state = state
@@ -90,7 +92,7 @@ class MonteCarloTreeSearchNode(Strategy):
     def rollout1(self):
         # current_rollout_state = self.state
         current_rollout = self
-        max_depth = 20 if self.depth < 80 else 40
+        max_depth = EARLY_DEPTH if self.depth < DEPTH_THRESHOLD else LATE_DEPTH
         depth = 0
 
         while not current_rollout.is_terminal_node() and max_depth > depth:
@@ -110,36 +112,13 @@ class MonteCarloTreeSearchNode(Strategy):
 
         # didn't reach a terminal state
         if not current_rollout.is_terminal_node():
-            # positive = good for current player, negative otherwise
-            score = 0
-            board = current_rollout.state.get_board()
-            for r in range(BOARD_N):
-                for c in range(BOARD_N):
-                    if board[r][c] == self.state.get_current_player():
-                        match self.state.get_current_player():
-                            case BitBoard.FROG:
-                                score += r
-                                break
-                            case BitBoard.OPPONENT:
-                                score += BOARD_N - 1 - r
-                                break
-                    elif board[r][c] not in (BitBoard.LILLY, BitBoard.EMPTY):
-                        match self.state.get_current_player():
-                            case BitBoard.FROG:
-                                score -= BOARD_N - 1 - r
-                                break
-                            case BitBoard.OPPONENT:
-                                score -= r
-                                break
-                        score -= (
-                            BOARD_N - 1 - r
-                        )  # still an error here, not calculated coorectl
-            return 1 if score > 0 else (-1 if score < 0 else 0)
-        # else:
-        #     print(f"I am {self.state.get_current_player()}")
-        #     print(current_rollout.state.get_board())
+            return current_rollout.state.evaluate_position()
 
         return current_rollout.state.get_winner()
+
+
+
+
 
     def backpropagate(self, result):
         self._number_of_visits += 1
