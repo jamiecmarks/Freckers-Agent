@@ -185,7 +185,7 @@ class MonteCarloTreeSearchNode(Strategy):
         # state = self.state
         # depth = 0
         # max_depth = 50  # if depth < 50 else 150
-        max_depth = 50
+        max_depth = 30
 
         # fast, stateless playout on BitBoard only
         while not state.is_game_over() and depth < max_depth:
