@@ -6,7 +6,7 @@ import random
 
 class RandomStrat(Strategy):
     def __init__(self, state):
-        self.weighted = True
+        self.weighted = False
         super().__init__(state)
 
     def find_child(self, action):
@@ -29,7 +29,9 @@ class RandomStrat(Strategy):
             )
         else:
             idx = np.random.randint(len(possible_moves))
+
         action = possible_moves[idx][0]
+
         # res = None
         # if not isinstance(action, GrowAction):
         #     res = action.coord

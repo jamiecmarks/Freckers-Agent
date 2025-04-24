@@ -2,6 +2,8 @@ import numpy as np
 from referee.game.actions import MoveAction, GrowAction
 from referee.game.coord import Coord, Direction
 from referee.game.constants import BOARD_N
+import math
+import numpy as np
 
 
 class BitBoard:
@@ -200,3 +202,162 @@ class BitBoard:
         if self.current_player != BitBoard.FROG:
             delta = -delta
         return delta
+
+    def render(self) -> str:
+        """
+        Returns a visualisation of the game board as a multiline string, with
+        optional ANSI color codes and Unicode characters (if applicable).
+        """
+
+        def apply_ansi(str, bold=True):
+            bold_code = "\033[1m" if bold else ""
+            color_code = ""
+            if str == "R":
+                color_code = "\033[31m"
+            if str == "B":
+                color_code = "\033[34m"
+            if str == "*":
+                color_code = "\033[32m"
+            return f"{bold_code}{color_code}{str}\033[0m"
+
+        board = self.get_board()
+        output = ""
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                state = board[r][c]
+                if state == self.LILLY:
+                    text = "*"
+                elif state == self.OPPONENT or state == self.FROG:
+                    text = "B" if state == self.OPPONENT else "R"
+                elif state == self.EMPTY:
+                    text = "."
+                else:
+                    text = " "
+                output += apply_ansi(text, bold=False)
+                output += " "
+            output += "\n"
+        return output
+
+    def get_adjacent_leapfrog(self, coord: Coord, player):
+        """
+        Return a list of Coord positions where a lily pad is adjacent to the given Coord.
+        """
+        adjacent = []
+        for direction in Direction:
+            if player == BitBoard.FROG:
+                if direction.c <= 0:
+                    continue
+            if player == BitBoard.OPPONENT:
+                if direction.c >= 0:
+                    continue
+
+            next_r = coord.r + direction.r + direction.r
+            next_c = coord.c + direction.c + direction.c
+            if 0 <= next_r < BOARD_N and 0 <= next_c < BOARD_N:
+                if self.board[next_r][next_c] == BitBoard.LILLY:
+                    adjacent.append(Coord(next_r, next_c))
+        return len(adjacent)
+
+    def evaluate_position(self):
+        """Heuristic function that figures out
+        whether a move is generally better for
+        a given side
+        """
+
+        # Available ways to double jump (more better for us)
+        current_player = self.current_player
+        player_skips = 0
+        opponent_skips = 0
+        board = self.get_board()
+        players = [BitBoard.FROG, BitBoard.OPPONENT]
+        opponent_player = [x for x in players if x != self.current_player].pop()
+
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if board[r][c] == current_player:
+                    location = Coord(r, c)
+                    player_skips += self.get_adjacent_leapfrog(location, current_player)
+                elif board[r][c] == opponent_player:
+                    location = Coord(r, c)
+                    opponent_skips += self.get_adjacent_leapfrog(
+                        location, opponent_player
+                    )
+        skip_advantage = scaled_sigmoid(player_skips - opponent_skips, input_range=5)
+
+        # Now we want advancement level:
+        score = 0
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if board[r][c] == self.current_player:
+                    match self.current_player:
+                        case BitBoard.FROG:
+                            score += r
+                            break
+                        case BitBoard.OPPONENT:
+                            score += BOARD_N - 1 - r
+                            break
+                elif board[r][c] == opponent_player:
+                    match self.current_player:
+                        case BitBoard.FROG:
+                            score -= BOARD_N - 1 - r
+                            break
+                        case BitBoard.OPPONENT:
+                            score -= r
+                            break
+                    score -= (
+                        BOARD_N - 1 - r
+                    )  # still an error here, not calculated coorectl
+        score = scaled_sigmoid(score, input_range=10)
+        cluster_score = self.clustering_score()
+
+        weighted_score = (5 * score + 3 * skip_advantage + cluster_score) / 9
+        # print(weighted_score)
+        # print(self.render())
+        if weighted_score > 0.5:
+            return 1
+        return -1
+        # Clustering level?
+
+    def get_coordinates(self):
+        board = self.get_board()
+        coordinates = []
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if board[r][c] == self.current_player:
+                    coordinates.append((r, c))
+        return coordinates
+
+    def clustering_score(self, ideal_dist=2, sigma=0.5):
+        coords = self.get_coordinates()
+        # Calculate the centroid of the points (mean of coordinates)
+        centroid = np.mean(coords, axis=0)
+        # Calculate the Manhattan distance from each point to the centroid
+        distances = [np.abs(np.array(p) - centroid).sum() for p in coords]
+        avg_dist_to_centroid = np.mean(distances)
+        # Gaussian penalty for the difference from the ideal distance
+        penalty = ((avg_dist_to_centroid - ideal_dist) ** 2) / (2 * sigma**2)
+
+        # Compute the score using the Gaussian function
+        score = np.exp(-penalty)
+        # Clamp the score to be between 0 and 1
+        return max(0, min(1, score))
+
+
+def scaled_sigmoid(x, input_range=10, output_range=(0, 1)):
+    """
+    Scales input `x` using a sigmoid function.
+
+    Parameters:
+    - x: The input value (can be any real number).
+    - input_range: Controls how wide the input range is (e.g. 10 means -10 to 10 is the key range).
+    - output_range: Tuple (min, max) to map the sigmoid output to a subrange like (0.2, 0.8).
+
+    Returns:
+    - A float in the specified output range (default is (0, 1)).
+    """
+    # Standard sigmoid centered at 0, scaled to input_range
+    normalized = 1 / (1 + math.exp(-x * (2 / input_range)))
+
+    # Map to custom output range if needed
+    out_min, out_max = output_range
+    return out_min + normalized * (out_max - out_min)
