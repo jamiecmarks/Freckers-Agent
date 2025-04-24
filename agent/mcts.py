@@ -157,6 +157,7 @@ class MonteCarloTreeSearchNode(Strategy):
         if state.is_game_over():
             return state.get_winner()
 
+        return 1 if state.evaluate_position() > 0 else -1
         return 1 if self.heuristic_score(state) > 0 else -1
 
     def heuristic_score(self, state):

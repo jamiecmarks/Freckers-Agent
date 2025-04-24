@@ -311,6 +311,7 @@ class BitBoard:
         cluster_score = self.clustering_score()
 
         weighted_score = (5 * score + 3 * skip_advantage + cluster_score) / 9
+        return 2 * weighted_score - 1
         # print(weighted_score)
         # print(self.render())
         if weighted_score > 0.5:

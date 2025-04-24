@@ -6,7 +6,7 @@ import random
 
 class RandomStrat(Strategy):
     def __init__(self, state):
-        self.weighted = False
+        self.weighted = True
         super().__init__(state)
 
     def find_child(self, action):
