@@ -196,6 +196,61 @@ class BitBoard:
 
     def _move_priority(self, move):
         """
+        A stronger heuristic for prioritizing moves when expanding:
+        - Grow actions early get top billing
+        - Forward-move distance, with extra for multi-jumps
+        - Bonus for moving toward center columns
+        - Small penalty if landing spot lets your opponent have big jumps
+        Returns a float: higher == better.
+        """
+        action, res = move
+        board = self.board
+        me = self.current_player
+        mid = (BOARD_N - 1) / 2
+
+        # 1) GrowAction: more valuable the fewer lilies on board
+        if isinstance(action, GrowAction):
+            lily_count = (board == BitBoard.LILLY).sum()
+            # scale [0..1]: when lily_count=0 → 1.0, when full → 0.0
+            grow_score = 1.0 - (lily_count / (BOARD_N * BOARD_N))
+            # give grow a solid boost early (you could even taper by turn)
+            return 2.0 * grow_score
+
+        # 2) it's a MoveAction: compute forward distance
+        start_r, start_c = action.coord.r, action.coord.c
+        end_r, end_c = res.r, res.c
+        # forward delta (frogs down, opponent up)
+        delta = (end_r - start_r) if me == BitBoard.FROG else (start_r - end_r)
+
+        # 3) multi-jump bonus
+        num_hops = len(action.directions)
+        jump_bonus = 0.3 * (num_hops - 1)  # 0 hops → 0, double‐jump → +0.3, etc.
+
+        # 4) centralization bonus: how much closer to mid column?
+        center_gain = abs(start_c - mid) - abs(end_c - mid)
+        center_bonus = center_gain / BOARD_N  # normalize
+
+        # 5) blocking penalty: if the opponent on next turn can jump far from this landing
+        #    quick approximation: count their max hop from this cell
+        #    (you can comment this out if it's too slow)
+        temp = BitBoard(board.copy())
+        temp.current_player = me
+        temp.board[start_r][start_c] = BitBoard.EMPTY
+        temp.board[end_r][end_c] = me
+        temp.toggle_player()
+        opp_max = 0
+        for mv, mv_res in temp.get_all_moves():
+            if isinstance(mv, MoveAction):
+                dist = abs(mv_res.r - mv.coord.r)
+                opp_max = max(opp_max, dist)
+        block_penalty = 0.1 * opp_max  # more opp options → worse
+
+        # combine with weights
+        priority = 1.0 * delta + jump_bonus + center_bonus - block_penalty
+        return priority
+
+    def old_move_priority(self, move):
+        """
         Heuristic priority: forward moves first, then grow, then horizontal.
         """
         action, res = move
