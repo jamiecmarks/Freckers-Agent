@@ -18,6 +18,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results = defaultdict(int)
         self._results[1] = 0
         self._results[-1] = 0
+        self._total_reward = 0
         self._untried_actions = self.untried_actions()
         self.c = 0.35
 
@@ -30,6 +31,7 @@ class MonteCarloTreeSearchNode(Strategy):
         return self.state.get_all_moves()
 
     def q(self):
+        return self._total_reward
         wins = self._results[1]
         loses = self._results[-1]
         return wins - loses
@@ -158,6 +160,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 probs = [a / total for a in adjusted]
 
             state = random.choices(list(next_states.keys()), weights=probs)[0]
+            # state.toggle_player()
             # action, res = self.rollout_policy(state, depth=self.depth + depth // 2)
             # state = state.move(action, res)
             # state.toggle_player()
@@ -166,6 +169,7 @@ class MonteCarloTreeSearchNode(Strategy):
         if state.is_game_over():
             return state.get_winner()
 
+        return state.evaluate_position()
         return 1 if state.evaluate_position() > 0 else -1
         return 1 if self.heuristic_score(state) > 0 else -1
 
@@ -197,7 +201,8 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def backpropagate(self, result):
         self._number_of_visits += 1
-        self._results[result] += 1
+        # self._results[result] += 1
+        self._total_reward += result
 
         if self.parent:
             self.parent.backpropagate(-result)
