@@ -20,7 +20,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._total_reward = 0
         self._untried_actions = self.untried_actions()
-        self.c = 0.35
+        self.c = 0.25
 
         if parent:
             self.depth = parent.depth + 1
@@ -62,6 +62,51 @@ class MonteCarloTreeSearchNode(Strategy):
         while not self.is_fully_expanded():
             self.expand()
 
+    def new_rollout_policy(self, state, depth=0):
+        """
+        epsilon-greedy + softmax-weighted heuristic playout policy.
+        """
+        moves = state.get_all_moves()
+        num_moves = len(moves)
+        if num_moves == 0:
+            return None
+
+        # 1) ε-greedy: 10% of the time, explore uniformly at random
+        #
+        eps = 0 if depth > 15 else 0.02
+        if np.random.rand() < eps:
+            return moves[np.random.randint(num_moves)]
+
+        # 2) Otherwise, score each move by your heuristic
+        mid_col = (BOARD_N - 1) // 2
+        scores = []
+        for action, res in moves:
+            score = 0.0
+            if isinstance(action, GrowAction):
+                # early-game grow bonus, late-game penalty
+                score += 0.4 if (2 < depth < 15) else -0.2
+            else:
+                # reward long jumps
+                dist = abs(res.r - action.coord.r)
+                score += dist if dist > 0 else -0.5
+                # centering bonus early
+                if depth < 15:
+                    start_c, end_c = action.coord.c, res.c
+                    if abs(start_c - mid_col) > abs(end_c - mid_col):
+                        score += 0.1
+            scores.append(score)
+
+        # 3) Softmax to get a probability distribution
+        x = np.array(scores, dtype=np.float64)
+        # numerical stabilization
+        x = x - np.max(x)
+        exp_x = np.exp(x / 1.0)  # temperature = 1.0; tune if you like
+        probs = exp_x / exp_x.sum()
+
+        # 4) Sample one move according to that distribution
+        choice_idx = np.random.choice(num_moves, p=probs)
+        return moves[choice_idx]
+
     def rollout_policy(self, state, depth=0):
         weights = []
 
@@ -74,7 +119,6 @@ class MonteCarloTreeSearchNode(Strategy):
 
         for action, res in moves:
             score = 0
-            # bias grow early, disfavor later
             if isinstance(action, GrowAction):
                 score += 0.4 if (depth < 15 and depth > 2) else -0.2
             else:
@@ -94,24 +138,10 @@ class MonteCarloTreeSearchNode(Strategy):
                 if abs(start_c - mid_col) > abs(end_c - mid_col) and depth < 15:
                     score += 0.1
 
-                # # 2d) opponent’s next maximum jump penalty
-                # # simulate the move, toggle to opponent, measure their best jump
-                # child = state.move(action, res)
-                # child.toggle_player()
-                # opp_max = 0
-                # for mv, mv_res in child.get_all_moves():
-                #     if isinstance(mv, MoveAction):
-                #         opp_max = max(opp_max, abs(mv_res.r - mv.coord.r))
-                # score -= 0.1 * opp_max
             scores.append(score)
             if score > best_score:
                 best_score = score
                 best_move = (action, res)
-
-            # 2c) UCT score
-            # exploit = child.q() / n
-            # explore = self.c * math.sqrt((2 * math.log(N)) / n)
-            # weights.append(mult * (exploit + explore))
 
         raw = scores
         offset = -min(raw) if min(raw) < 0 else 0
@@ -122,21 +152,13 @@ class MonteCarloTreeSearchNode(Strategy):
         else:
             probs = [a / total for a in adjusted]
 
-        # if best_move is None:
-        #     return random.choice(moves)
-
         return random.choices(moves, probs)[0]
-        tot = sum(weights) + len(weights) * abs(min(weights))
-        weights = [(w + abs(min(weights))) / tot for w in weights]
-
-        probs = [w / sum(weights) for w in weights]
-        return random.choices(node.children, weights=probs)[0]
 
     # new version of rollout
     def simulate_playout(self):
         state = self.state
         depth = 0
-        max_depth = 20
+        max_depth = 50  # if depth < 50 else 150
 
         # fast, stateless playout on BitBoard only
         while not state.is_game_over() and depth < max_depth:
@@ -158,7 +180,7 @@ class MonteCarloTreeSearchNode(Strategy):
             #
             # state = random.choices(list(next_states.keys()), weights=probs)[0]
 
-            action, res = self.rollout_policy(state, depth=depth)
+            action, res = self.new_rollout_policy(state, depth=depth)
             state = state.move(action, res)
             state.toggle_player()
 
@@ -216,6 +238,24 @@ class MonteCarloTreeSearchNode(Strategy):
         # start exploratory, then exploit more later
         return self.c / (1 + np.log(1 + self.n()))
 
+    def new_tree_policy(self):
+        widen_k = 3
+        node = self
+        while not node.is_terminal_node():
+            # if no child yet, always expand first
+            if len(node.children) == 0:
+                return node.expand()
+
+            # if we still have untried actions AND
+            # we've visited this node enough times, expand
+            if not node.is_fully_expanded() and node.n() > widen_k * len(node.children):
+                return node.expand()
+
+            # otherwise, pick the best child by UCB
+            node = node.UCB_choose()
+
+        return node
+
     def _tree_policy(self):
         node = self
         # descend until we find a node we can expand or a terminal
@@ -240,12 +280,12 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def choose_next_action(self):
         # break ties by winrate
-        best = max(self.children, key=lambda c: (c.n(), c._results[1] / c.n()))
+        best = max(self.children, key=lambda c: (c.n(), c.q() / c.n()))
         return best
 
-    def best_action(self, simulation_no=400):
+    def best_action(self, simulation_no=250):
         for _ in range(simulation_no):
-            v = self._tree_policy()
+            v = self.new_tree_policy()
             reward = v.simulate_playout()
             v.backpropagate(reward)
 

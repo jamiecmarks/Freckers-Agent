@@ -48,12 +48,18 @@ class BitBoard:
                 self.frog_border_count[self.FROG] == BOARD_N - 2
                 and self.frog_border_count[self.OPPONENT] != BOARD_N - 2
             ):
-                return 1
+                if self.current_player == self.FROG:
+                    return 1
+                else:
+                    return -1
             elif (
                 self.frog_border_count[self.OPPONENT] == BOARD_N - 2
                 and self.frog_border_count[self.FROG] != BOARD_N - 2
             ):
-                return -1
+                if self.current_player == self.OPPONENT:
+                    return 1
+                else:
+                    return -1
             else:
                 return 0
         return 0
