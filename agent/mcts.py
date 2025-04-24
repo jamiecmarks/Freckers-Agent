@@ -19,7 +19,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[1] = 0
         self._results[-1] = 0
         self._untried_actions = self.untried_actions()
-        self.c = 1.0
+        self.c = 0.25
 
         if parent:
             self.depth = parent.depth + 1
@@ -56,38 +56,134 @@ class MonteCarloTreeSearchNode(Strategy):
     def is_terminal_node(self):
         return self.state.is_game_over()
 
-    def rollout(self):
-        current_rollout_state = self.state
-        max_depth = 20 if self.depth < 80 else 40
+    def fully_expand(self):
+        while not self.is_fully_expanded():
+            self.expand()
+
+    def rollout_policy(self, state):
+        # return random.choice(state.get_all_moves())
+        # given some state, give me the best action -> action, res
+        # 1) If any child is terminal, just pick it
+        # 2) Compute a weight for every child
+        weights = []
+
+        best_score = -float("inf")
+        best_move = None
+        mid_col = (BOARD_N - 1) // 2
+        curr_player = state.get_current_player()
+
+        for action, res in state.get_all_moves():
+            score = 0
+            # bias grow early, disfavor later
+            if isinstance(action, GrowAction):
+                # score += 0.2 if (self.depth < 15 and self.depth > 2) else -0.2
+                total_cells = BOARD_N * BOARD_N
+                lily_count = (state.get_board() == state.LILLY).sum()
+                score += 1.0 - (lily_count / total_cells)
+            else:
+                # e.g. reward long jumps, centering, etc.
+
+                # 2b) multi-jump bonus
+                jump_dist = abs(res.r - action.coord.r)
+                if jump_dist > 1:
+                    score += 0.2 * jump_dist
+
+                # 2c) centering bonus
+                start_c, end_c = action.coord.c, res.c
+                if abs(start_c - mid_col) > abs(end_c - mid_col):
+                    score += 0.1
+
+                # 2d) opponent’s next maximum jump penalty
+                # simulate the move, toggle to opponent, measure their best jump
+                child = state.move(action, res)
+                child.toggle_player()
+                opp_max = 0
+                for mv, mv_res in child.get_all_moves():
+                    if isinstance(mv, MoveAction):
+                        opp_max = max(opp_max, abs(mv_res.r - mv.coord.r))
+                score -= 0.1 * opp_max
+            if score > best_score:
+                best_score = score
+                best_move = (action, res)
+
+            # 2c) UCT score
+            # exploit = child.q() / n
+            # explore = self.c * math.sqrt((2 * math.log(N)) / n)
+            # weights.append(mult * (exploit + explore))
+        if best_move is None:
+            return random.choice(state.get_all_moves())
+        return best_move
+        tot = sum(weights) + len(weights) * abs(min(weights))
+        weights = [(w + abs(min(weights))) / tot for w in weights]
+
+        probs = [w / sum(weights) for w in weights]
+        return random.choices(node.children, weights=probs)[0]
+
+    # new version of rollout
+    def simulate_playout(self):
+        state = self.state
         depth = 0
+        max_depth = 10
 
-        while not current_rollout_state.is_game_over() and max_depth > depth:
-            possible_moves = current_rollout_state.get_all_moves()
-
-            if not possible_moves:
-                break
-
-            action = self.rollout_policy(possible_moves)
-            current_rollout_state = current_rollout_state.move(action[0], action[1])
-            current_rollout_state.toggle_player()
+        # fast, stateless playout on BitBoard only
+        while not state.is_game_over() and depth < max_depth:
+            # moves = state.get_all_moves()
+            action, res = self.rollout_policy(state)
+            state = state.move(action, res)
+            state.toggle_player()
             depth += 1
 
-        # didn't reach a terminal state
-        if not current_rollout_state.is_game_over():
-            # positive = good for current player, negative otherwise
-            score = 0
-            board = current_rollout_state.get_board()
-            for r in range(BOARD_N):
-                for c in range(BOARD_N):
-                    if board[r][c] == current_rollout_state.FROG:
-                        score += r
-                    elif board[r][c] == current_rollout_state.OPPONENT:
-                        score -= BOARD_N - 1 - r
-            return 1 if score > 0 else (-1 if score < 0 else 0)
+        if state.is_game_over():
+            return state.get_winner()
+        # nonterminal: fallback to simple heuristic
+        return 1 if self.heuristic_score(state) > 0 else -1
 
-        return current_rollout_state.get_winner()
+    def temp_rollout(self):
+        curr = self
+        depth = 0
+        max_depth = 10 if self.depth < 80 else 30
 
-    def rollout1(self):
+        while not curr.state.is_game_over() and depth < max_depth:
+            curr_player = curr.state.get_current_player()
+            curr.fully_expand()
+
+            curr = self.best_child(curr)  # heuristic based
+            if curr.state.get_current_player() == curr_player:
+                curr.state.toggle_player()
+            depth += 1
+
+        if curr.state.is_game_over():
+            return curr.state.get_winner()
+        # otherwise fall back to your board-scoring heuristic:
+        return 1 if self.heuristic_score(curr.state) > 0 else -1
+
+    def heuristic_score(self, state):
+        score = 0
+        board = state.get_board()
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if board[r][c] == self.state.get_current_player():
+                    match self.state.get_current_player():
+                        case BitBoard.FROG:
+                            score += r
+                            break
+                        case BitBoard.OPPONENT:
+                            score += BOARD_N - 1 - r
+                            break
+                elif board[r][c] not in (BitBoard.LILLY, BitBoard.EMPTY):
+                    match self.state.get_current_player():
+                        case BitBoard.FROG:
+                            score -= BOARD_N - 1 - r
+                            break
+                        case BitBoard.OPPONENT:
+                            score -= r
+                            break
+                    score -= (
+                        BOARD_N - 1 - r
+                    )  # still an error here, not calculated coorectl
+        return score
+
+    def rollout(self):
         # current_rollout_state = self.state
         current_rollout = self
         max_depth = 20 if self.depth < 80 else 40
@@ -155,95 +251,65 @@ class MonteCarloTreeSearchNode(Strategy):
         # start exploratory, then exploit more later
         return self.c / (1 + np.log(1 + self.n()))
 
-    def best_child(self):
-        # chooose_rand = len(self._untried_actions)
-        choices_weights = []
-        for c in self.children:
-            if c.is_terminal_node():
-                return c
+    def best_child(self, node):
+        # 1) If any child is terminal, just pick it
+        for child in node.children:
+            if child.is_terminal_node():
+                return child
 
-            if c.n() == 0:
-                choices_weights.append(float("inf"))  # prioritize unvisited nodes
-                # choices_weights.append(c.q() / c.n())
+        # 2) Compute a weight for every child
+        weights = []
+        N = node.n()
+        for child in node.children:
+            n = child.n()
+            # 2a) Force at least one visit per child
+            if n == 0:
+                weights.append(10)
+                continue
+
+            # 2b) Compute your heuristic “mult” bonus
+            mult = 1.0
+            action = child.parent_action[0]
+            # bias grow early, disfavor later
+            if isinstance(action, GrowAction):
+                mult += 0.2 if (node.depth < 15 and node.depth > 2) else -0.2
             else:
-                mult = 1
-                if isinstance(c.parent_action[0], GrowAction):
-                    mult += 0.2 if self.depth < 15 and self.depth > 2 else -0.2
-                else:
-                    start_r = c.parent_action[0].coord.r
-                    end_r = c.parent_action[1].r
-                    start_c = c.parent_action[0].coord.c
-                    end_c = c.parent_action[1].c
-                    vert_dist = abs(start_r - end_r)
-                    if vert_dist > 1:
-                        mult += 0.2 * vert_dist
-                    elif vert_dist == 0:
-                        mult -= 0.2
+                # e.g. reward long jumps, centering, etc.
+                sr, sc = action.coord.r, action.coord.c
+                er, ec = child.parent_action[1].r, child.parent_action[1].c
+                vert_dist = abs(sr - er)
+                if vert_dist > 1:
+                    mult += 0.3 * vert_dist
+                elif vert_dist == 0:
+                    mult -= 0.2
 
-                    midboard = (BOARD_N - 1) // 2
+                mid = (BOARD_N - 1) // 2
+                if abs(sc - mid) > abs(ec - mid):
+                    mult += 0.2 if node.depth < 25 else 0
 
-                    if abs(start_c - midboard) > abs(end_c - midboard):
-                        # moving towards the middle is good
-                        mult += 0.2 if self.depth < 25 else 0
+                # penalty for letting opponent have big jumps next
+                max_adv = 0
+                for mv, res in child.state.get_all_moves():
+                    if isinstance(mv, MoveAction):
+                        max_adv = max(max_adv, abs(res.r - mv.coord.r))
+                mult -= 0.1 * (max_adv - 1)
 
-                    max_adv_dist = 0
-                    for mv, res in c.state.get_all_moves():
-                        if isinstance(mv, MoveAction):
-                            max_adv_dist = max(max_adv_dist, abs(res.r - mv.coord.r))
+            # 2c) UCT score
+            # exploit = child.q() / n
+            # explore = self.c * math.sqrt((2 * math.log(N)) / n)
+            # weights.append(mult * (exploit + explore))
 
-                    mult -= 0.1 * (
-                        max_adv_dist - 1
-                    )  # try and be a menace and minimize opponents vertical movement
+        # max_w = max(weights)
+        # best_idxs = [i for i, w in enumerate(weights) if w == max_w]
+        # chosen = random.choice(best_idxs)
+        # return node.children[chosen]
+        # choose from a probability distr based off the weight
+        # first make all the weights into probabilities, remember it can be negative sometimes
+        tot = sum(weights) + len(weights) * abs(min(weights))
+        weights = [(w + abs(min(weights))) / tot for w in weights]
 
-                choices_weights.append(
-                    mult
-                    * (
-                        (c.q() / c.n())
-                        + self.c * np.sqrt((2 * np.log(self.n()) / c.n()))
-                    )
-                )
-        max_val = max(choices_weights)
-        all_max = [i for i, v in enumerate(choices_weights) if v == max_val]
-        return self.children[random.choice(all_max)]
-
-    def heuristic_score(self, move, current_player):
-        action, res = move
-        # moving actions
-        if isinstance(action, MoveAction):
-            # how “forward” is the landing row?
-            # frogs want to maximize r, opponents minimize r
-            dist = res.r if current_player == BitBoard.FROG else (BOARD_N - 1 - res.r)
-            return dist
-        # growing is valuable early on (when few lilies exist)
-        elif isinstance(action, GrowAction):
-            return 0.5
-        else:
-            return 0.0
-
-    def rollout_policy(self, possible_moves):
-        # compute raw scores
-        #
-        eps = 0.2  # 80% follow “best” move, 20% pick random
-        if np.random.rand() < eps:
-            return possible_moves[np.random.randint(len(possible_moves))]
-
-        best = max(possible_moves, key=lambda mv: self.state._move_priority(mv))
-
-        return best
-
-        #
-        # scores = [
-        #     self.heuristic_score(mv, self.state.get_current_player())
-        #     for mv in possible_moves
-        # ]
-        # # shift to all‑positive and softmax
-        # exp_scores = np.exp(np.array(scores) / 0.5)  # 0.5 is the temperature
-        #
-        # probs = exp_scores / exp_scores.sum()
-        # idx = np.random.choice(len(possible_moves), p=probs)
-        # return possible_moves[idx]
-
-        return possible_moves[np.random.randint(len(possible_moves))]
+        probs = [w / sum(weights) for w in weights]
+        return random.choices(node.children, weights=probs)[0]
 
     def _tree_policy(self):
         current_node = self
@@ -251,24 +317,50 @@ class MonteCarloTreeSearchNode(Strategy):
         if not current_node.is_fully_expanded():
             return current_node.expand()
         else:
-            current_node = current_node.best_child()
+            current_node = current_node.UCB_choose()
+            # current_node = current_node.best_child()
         return current_node
+
+    def new_tree_policy(self):
+        node = self
+        # descend until we find a node we can expand or a terminal
+        while not node.is_terminal_node():
+            if not node.is_fully_expanded():
+                return node.expand()  # expand one child and return it
+            else:
+                node = node.UCB_choose()
+        return node
+
+    def UCB_choose(self):
+        # return self.best_child()
+        for child in self.children:
+            if child.n() == 0:
+                return child
+
+        scores = [
+            (c.q() / c.n()) + self.dynamic_c() * np.sqrt((2 * np.log(self.n()) / c.n()))
+            for c in self.children
+        ]
+        return self.children[np.argmax(scores)]
 
     def choose_next_action(self):
         children = self.children
-        num_visited = []
-        for child in children:
-            num_visited.append(child.n())
-
-        return children[np.argmax(num_visited)]
+        return max(children, key=lambda c: c.n())
 
     def best_action(self, simulation_no=100):
         # if not self.children and self._untried_actions:
         #     self.expand()
 
+        # for _ in range(simulation_no):
+        #     v = self._tree_policy()
+        #     # reward = v.rollout()
+        #     reward = v.temp_rollout()
+        #     v.backpropagate(reward)
+
         for _ in range(simulation_no):
-            v = self._tree_policy()
-            reward = v.rollout1()
+            v = self.new_tree_policy()
+            # reward = v.rollout()
+            reward = v.simulate_playout()
             v.backpropagate(reward)
 
         best = self.choose_next_action()
