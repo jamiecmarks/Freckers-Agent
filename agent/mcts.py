@@ -77,9 +77,6 @@ class MonteCarloTreeSearchNode(Strategy):
             # bias grow early, disfavor later
             if isinstance(action, GrowAction):
                 score += 0.4 if (depth < 15 and depth > 2) else -0.2
-                total_cells = BOARD_N * BOARD_N
-                lily_count = (state.get_board() == state.LILLY).sum()
-                # score -= lily_count / total_cells
             else:
                 # e.g. reward long jumps, centering, etc.
 
@@ -87,7 +84,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 # 2b) multi-jump bonus
                 #
                 if vert_dist < 1:
-                    score -= 0.5
+                    score -= 0.9
                 else:
                     score += 1 * vert_dist
 
@@ -144,22 +141,27 @@ class MonteCarloTreeSearchNode(Strategy):
         # fast, stateless playout on BitBoard only
         while not state.is_game_over() and depth < max_depth:
             # moves = state.get_all_moves()
-            next_states = {}
-            for action, res in state.get_all_moves():
-                next_state = state.move(action, res)
-                next_state.toggle_player()
-                next_states[next_state] = next_state.evaluate_position()
+            # next_states = {}
+            # for action, res in state.get_all_moves():
+            #     next_state = state.move(action, res)
+            #     next_state.toggle_player()
+            #     next_states[next_state] = next_state.evaluate_position()
+            #
+            # raw = next_states.values()
+            # offset = -min(raw) if min(raw) < 0 else 0
+            # adjusted = [s + offset for s in raw]
+            # total = sum(adjusted)
+            # if total == 0:
+            #     probs = [1 / len(raw)] * len(raw)
+            # else:
+            #     probs = [a / total for a in adjusted]
+            #
+            # state = random.choices(list(next_states.keys()), weights=probs)[0]
 
-            raw = next_states.values()
-            offset = -min(raw) if min(raw) < 0 else 0
-            adjusted = [s + offset for s in raw]
-            total = sum(adjusted)
-            if total == 0:
-                probs = [1 / len(raw)] * len(raw)
-            else:
-                probs = [a / total for a in adjusted]
+            action, res = self.rollout_policy(state, depth=depth)
+            state = state.move(action, res)
+            state.toggle_player()
 
-            state = random.choices(list(next_states.keys()), weights=probs)[0]
             # state.toggle_player()
             # action, res = self.rollout_policy(state, depth=self.depth + depth // 2)
             # state = state.move(action, res)
@@ -241,7 +243,7 @@ class MonteCarloTreeSearchNode(Strategy):
         best = max(self.children, key=lambda c: (c.n(), c._results[1] / c.n()))
         return best
 
-    def best_action(self, simulation_no=75):
+    def best_action(self, simulation_no=400):
         for _ in range(simulation_no):
             v = self._tree_policy()
             reward = v.simulate_playout()
