@@ -94,6 +94,9 @@ class MonteCarloTreeSearchNode(Strategy):
         depth = 0
 
         while not current_rollout.is_terminal_node() and max_depth > depth:
+            if current_rollout.depth > 75:
+                break
+
             curr_player = current_rollout.state.get_current_player()
             current_rollout = current_rollout._tree_policy()
             if current_rollout.state.get_current_player() == curr_player:
@@ -176,10 +179,21 @@ class MonteCarloTreeSearchNode(Strategy):
                         mult += 0.2 * vert_dist
                     elif vert_dist == 0:
                         mult -= 0.2
+
                     midboard = (BOARD_N - 1) // 2
+
                     if abs(start_c - midboard) > abs(end_c - midboard):
                         # moving towards the middle is good
                         mult += 0.2 if self.depth < 25 else 0
+
+                    max_adv_dist = 0
+                    for mv, res in c.state.get_all_moves():
+                        if isinstance(mv, MoveAction):
+                            max_adv_dist = max(max_adv_dist, abs(res.r - mv.coord.r))
+
+                    mult -= 0.2 * (
+                        max_adv_dist - 1
+                    )  # try and be a menace and minimize opponents vertical movement
 
                 choices_weights.append(
                     mult
@@ -248,7 +262,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
         return children[np.argmax(num_visited)]
 
-    def best_action(self, simulation_no=150):
+    def best_action(self, simulation_no=100):
         # if not self.children and self._untried_actions:
         #     self.expand()
 

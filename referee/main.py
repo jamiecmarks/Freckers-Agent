@@ -20,26 +20,34 @@ from referee.server.game import RemoteGame
 
 from .game import Player, PlayerColor
 from .log import LogStream, LogColor, LogLevel
-from .run import game_user_wait, run_game, \
-    game_commentator, game_event_logger, game_delay, output_board_updates
+from .run import (
+    game_user_wait,
+    run_game,
+    game_commentator,
+    game_event_logger,
+    game_delay,
+    output_board_updates,
+)
 from .agent import AgentProxyPlayer
 from .options import get_options, PlayerLoc
 from .server import RemoteServer, InvalidAckError
 
 
-def main(options: Namespace|None=None):
+def main(options: Namespace | None = None):
     if options is None:
         options = get_options()
     assert options is not None
 
     # Log config
-    LogStream.set_global_setting("level", 
+    LogStream.set_global_setting(
+        "level",
         [
             LogLevel.CRITICAL,
             LogLevel.INFO,
             LogLevel.INFO,
             LogLevel.DEBUG,
-        ][options.verbosity])
+        ][options.verbosity],
+    )
     LogStream.set_global_setting("ansi", options.use_colour)
     LogStream.set_global_setting("unicode", options.use_unicode)
 
@@ -54,8 +62,7 @@ def main(options: Namespace|None=None):
     gl_path: Path | None = None
 
     if options.logfile is not None:
-
-        if options.logfile == 'stdout':
+        if options.logfile == "stdout":
             # Standard stdout game log stream
             gl = LogStream(
                 namespace="game",
@@ -75,10 +82,10 @@ def main(options: Namespace|None=None):
                 if gl_path is not None:
                     with open(gl_path, "a") as f:
                         f.write(message + "\n")
-            
+
             # File game log stream
             gl = LogStream(
-                namespace="game", 
+                namespace="game",
                 ansi=False,
                 handlers=[game_log_handler],
                 output_namespace=False,
@@ -99,7 +106,7 @@ def main(options: Namespace|None=None):
                 player_loc,
                 time_limit=options.time,
                 space_limit=options.space,
-                log=LogStream(f"player{p_num}", LogColor[str(player_color)])
+                log=LogStream(f"player{p_num}", LogColor[str(player_color)]),
             )
             agents[p] = {
                 "name": player_name,
@@ -110,9 +117,9 @@ def main(options: Namespace|None=None):
         rl.info("running game server...")
 
         sl = LogStream(
-            "server", 
+            "server",
             ansi=options.use_colour,
-            color=LogColor.GREEN, 
+            color=LogColor.GREEN,
         )
 
         if options.run_server:
@@ -127,17 +134,16 @@ def main(options: Namespace|None=None):
             event_handlers = [
                 game_event_logger(gl) if gl is not None else None,
                 game_commentator(rl),
-                output_board_updates(rl, 
-                                     options.use_colour, 
-                                     options.use_unicode)\
-                    if options.verbosity >= 2 else None,
+                output_board_updates(rl, options.use_colour, options.use_unicode)
+                if options.verbosity >= 2
+                else None,
                 game_delay(options.wait) if options.wait > 0 else None,
                 game_user_wait(rl) if options.wait < 0 else None,
                 RemoteGame(
-                    server,
-                    [agents[p]["name"] for p in agents.keys()],
-                    []
-                ).event_handler() if options.run_server else None,
+                    server, [agents[p]["name"] for p in agents.keys()], []
+                ).event_handler()
+                if options.run_server
+                else None,
             ]
 
             if options.run_server:
@@ -152,13 +158,10 @@ def main(options: Namespace|None=None):
                 await server.stop()
 
             return result
-        
+
         async def _run_all():
-            return await asyncio.gather(
-                _run(options),
-                _run_server()
-            )
-        
+            return await asyncio.gather(_run(options), _run_server())
+
         [game_result, _] = asyncio.run(_run_all(), debug=True)
 
         # Print the final result under all circumstances
@@ -189,7 +192,8 @@ def main(options: Namespace|None=None):
         rl.critical("\n")
         rl.critical(
             f">> Please report this error to the course staff, including\n"
-            f">> the trigger and the above stack trace.")
+            f">> the trigger and the above stack trace."
+        )
 
         rl.critical(f"result: <error>")
         exit(1)
