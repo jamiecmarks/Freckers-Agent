@@ -191,7 +191,7 @@ class MonteCarloTreeSearchNode(Strategy):
                         if isinstance(mv, MoveAction):
                             max_adv_dist = max(max_adv_dist, abs(res.r - mv.coord.r))
 
-                    mult -= 0.2 * (
+                    mult -= 0.1 * (
                         max_adv_dist - 1
                     )  # try and be a menace and minimize opponents vertical movement
 
