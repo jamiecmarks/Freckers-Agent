@@ -330,7 +330,7 @@ class MonteCarloTreeSearchNode(Strategy):
         )
         return best
 
-    def best_action(self, simulation_no=100):
+    def best_action(self, simulation_no=50):
         for _ in range(simulation_no):
             v = self.new_tree_policy()
             reward = v.simulate_playout()
