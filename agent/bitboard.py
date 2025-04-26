@@ -4,6 +4,8 @@ from referee.game.coord import Coord, Direction
 from referee.game.constants import BOARD_N
 import math
 import numpy as np
+import heapq
+import itertools
 
 
 class BitBoard:
@@ -11,6 +13,12 @@ class BitBoard:
     FROG = 0b10
     EMPTY = 0b00
     OPPONENT = 0b11
+
+    DOWN = 1
+    UP = -1
+    LEFT = -1
+    RIGHT = 1
+    SAME = 0
 
     def __init__(self, board=None):
         if board is None:
@@ -403,6 +411,249 @@ class BitBoard:
         score = np.exp(-penalty)
         # Clamp the score to be between 0 and 1
         return max(0, min(1, score))
+
+    def dijkstra_algorithm(self, compressions, start_row):
+        """
+        Performs Dijkstra's algorithm (or uniform cost search in this case)
+        search on the simplified representation of the problem, to return a heuristic.
+        Using Dijkstra allows for the option of non-uniform costs in the future.
+        """
+
+        # Defines the winning condition
+        if self.current_player == BitBoard.FROG:
+            target = BOARD_N - 1
+        else:
+            target = 0
+
+        # Initialises dijkstra, assuming all distances are inf initially
+        distances = {i: float("inf") for i in range(start_row, BOARD_N)}
+        distances[start_row] = 0
+        queue = [(0, start_row)]
+
+        while queue:
+            # Explore the most promising search node
+            cost, current = heapq.heappop(queue)
+
+            # If target is at the frontier, we must have found shortest the path to it
+            if current == target:
+                return cost
+
+            next_row = current + 1
+            if next_row < BOARD_N and cost + 1 < distances[next_row]:
+                distances[next_row] = cost + 1
+                heapq.heappush(queue, (cost + 1, next_row))
+
+            # Update graph based on any available compressions
+            if current in compressions:
+                for jump in compressions[current]:
+                    next_row = current + jump
+                    if next_row < BOARD_N and cost + 1 < distances[next_row]:
+                        distances[next_row] = cost + 1
+                        heapq.heappush(queue, (cost + 1, next_row))
+
+        # Return infinity if solution not possible (although technically always should be)
+        return float("inf")
+
+    def get_all_optimal_moves(self):
+        all_moves = []
+        for coord in self.get_all_pos(self.current_player):
+            move_set = self.a_star_new(coord)
+            if move_set:
+                all_moves.append(
+                    move_set[0]
+                )  # just need the first move in the optimal seq
+                print(coord)
+                for move in move_set:
+                    print(move)
+
+        all_moves.append((GrowAction(), None))
+
+        return all_moves
+
+    def a_star_new(self, coord):
+        start = coord
+        target = 0  # BOARD_N - 1
+
+        # precompute heuristics per row
+        compressions = self.get_all_compressions()
+        h = [self.jump_heuristic(r, compressions) for r in range(BOARD_N)]
+
+        # priority queue holds (f, coord, bitboard)
+        open_heap = []
+        # make a fresh copy of self for the root
+        root_bb = BitBoard(self.board.copy())
+        root_bb.current_player = self.current_player
+
+        counter = itertools.count()
+
+        heapq.heappush(open_heap, (h[start.r], next(counter), start, root_bb))
+
+        came_from = {}
+        g_score = {start: 0}
+
+        while open_heap:
+            f, _, current, bb = heapq.heappop(open_heap)
+            if current.r == target:
+                return self.reconstruct_path(came_from, current)
+
+            # generate all hops *from this exact board*
+            for action, neighbor in bb.get_possible_move(current):
+                tentative_g = g_score[current] + 1
+                if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                    g_score[neighbor] = tentative_g
+                    came_from[neighbor] = (current, action)
+                    new_f = tentative_g + h[neighbor.r]
+
+                    # make the hopped board
+                    new_bb = bb.move(action, neighbor)
+                    # preserve the same player so forward stays 1
+                    new_bb.current_player = bb.current_player
+
+                    heapq.heappush(open_heap, (new_f, next(counter), neighbor, new_bb))
+
+        return None
+
+    def a_star(self, coord):
+        """The main A* search function.
+        It uses a priority queue along with the informed
+        heuristic above to find the optimal path to the goal."""
+        start = coord
+
+        # Finds all compressions for the board
+        compression_dict = self.get_all_compressions()
+
+        # Pre computes heuristic values so we don't repeatedly calculate them
+        heuristic_dict = {}
+        for i in range(BOARD_N):
+            heuristic_dict[i] = self.jump_heuristic(i, compression_dict)
+
+        if start is None:
+            return None
+
+        closed_set = set()
+        came_from = {}
+        g_score = {start: 0}
+
+        open_heap = []
+        heapq.heappush(open_heap, (heuristic_dict[start.r], start))
+
+        # --------------- Search logic -------------#
+        while open_heap:
+            # don't need f_score, just for the heap
+            _, current = heapq.heappop(open_heap)
+
+            # If we are
+            if current.r == BOARD_N - 1:
+                return self.reconstruct_path(came_from, current)
+
+            closed_set.add(current)
+
+            moves = self.get_possible_move(current)
+
+            for move, neighbor in moves:
+                if neighbor in closed_set:
+                    continue
+
+                saved_board = self.board
+                tmp = BitBoard(saved_board.copy())
+                # tmp = tmp.move(move, neighbor)
+                tmp.current_player = self.current_player
+                tmp.board[current.r][current.c] = BitBoard.EMPTY
+                tmp.board[neighbor.r][neighbor.c] = self.current_player
+
+                # 2) swap it in so get_possible_move() will see the frog up at `neighbor`
+                self.board = tmp.board
+
+                possible_g_score = g_score[current] + 1  # each move costs 1
+
+                if neighbor not in g_score or possible_g_score < g_score[neighbor]:
+                    came_from[neighbor] = (current, move)
+                    g_score[neighbor] = possible_g_score
+                    new_f_score = possible_g_score + heuristic_dict[neighbor.r]
+                    heapq.heappush(open_heap, (new_f_score, neighbor))
+
+                self.board = saved_board
+
+        return None
+
+    def reconstruct_path(self, came_from, current: Coord):
+        """Uses the came_from dictionary to reconstruct the path from the start"""
+        total_path = []
+        while current in came_from:
+            current, move = came_from[current]
+            total_path.append(move)
+
+        return total_path[::-1]
+
+    def get_all_compressions(self) -> dict:
+        """A function that takes the board and a list of blue locations and returns a
+        graph of the possible connections between rows on the board via jumps in the form of a dictionary."""
+
+        locations = self.get_all_pos(self.current_player)
+
+        if not locations:
+            return {}
+
+        compressions = {}
+
+        if self.current_player == BitBoard.FROG:
+            offsets = [
+                (self.SAME, self.RIGHT),
+                (self.SAME, self.LEFT),
+                (self.UP, self.LEFT),
+                (self.UP, self.SAME),
+                (self.UP, self.RIGHT),
+            ]
+        else:
+            offsets = [
+                (self.SAME, self.RIGHT),
+                (self.SAME, self.LEFT),
+                (self.DOWN, self.LEFT),
+                (self.DOWN, self.SAME),
+                (self.DOWN, self.RIGHT),
+            ]
+
+        coords = []
+        for location in locations:
+            for offset in offsets:
+                try:
+                    r = offset[0]
+                    c = offset[1]
+                    coords.append(location + Coord(r, c))
+                except ValueError:
+                    # Skip invalid coordinates
+                    continue
+                # r = offset[0]
+                # c = offset[1]
+                # safe_col = (c + location.c >= 0) and (c + location.c < BOARD_N)
+                # safe_row = (r + location.r >= 0) and (r + location.r < BOARD_N)
+                # if safe_col and safe_row:
+                #     coords.append(location + Coord(r, c))
+
+        coordsfiltered = [
+            coord
+            for coord in coords
+            if self.board[coord.r][coord.c] in [self.LILLY, self.OPPONENT, self.FROG]
+        ]
+
+        for coord in coordsfiltered:
+            moves = self.get_possible_move(coord)
+            for move_action, neighbor in moves:
+                distance = neighbor.r - coord.r
+                if distance > 1:
+                    if coord.r not in compressions.keys():
+                        compressions[coord.r] = [distance]
+                    elif distance not in compressions[coord.r]:
+                        compressions[coord.r].append(distance)
+
+        return compressions
+
+    def jump_heuristic(self, row: int, compression_dict):
+        """
+        A function that takes the board, a coordinate, and
+        returns a heurstic for the estimated distance to the end
+        """
+        return self.dijkstra_algorithm(compression_dict, row)
 
 
 def scaled_sigmoid(x, input_range=10, output_range=(0, 1)):

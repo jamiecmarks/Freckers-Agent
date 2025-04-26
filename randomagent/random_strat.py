@@ -1,5 +1,5 @@
 import numpy as np
-from referee.game.actions import GrowAction, MoveAction
+from referee.game.actions import GrowAction
 from agent.strategy import Strategy
 import random
 

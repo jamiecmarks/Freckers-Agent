@@ -40,6 +40,7 @@ class Agent:
         # the initial moves of the game, so you should use some game playing
         # technique(s) to determine the best action to take.
 
+        print(self.root.state.get_all_optimal_moves())
         action_out = self.root.best_action()  # simulate only as many moves as possible
 
         # print(action_out["res_node"].state.get_board())
