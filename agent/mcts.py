@@ -28,6 +28,9 @@ class MonteCarloTreeSearchNode(Strategy):
             self.depth = 0
 
     def untried_actions(self):
+        all_moves = self.state.get_all_optimal_moves()
+        if len(all_moves) > 1:
+            return all_moves
         return self.state.get_all_moves()
 
     def q(self):

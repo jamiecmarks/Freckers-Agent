@@ -462,9 +462,9 @@ class BitBoard:
                 all_moves.append(
                     move_set[0]
                 )  # just need the first move in the optimal seq
-                print(coord)
-                for move in move_set:
-                    print(move)
+                # print(coord)
+                # for move, res in move_set:
+                #     print(move, res)
 
         all_moves.append((GrowAction(), None))
 
@@ -472,7 +472,10 @@ class BitBoard:
 
     def a_star_new(self, coord):
         start = coord
-        target = 0  # BOARD_N - 1
+        if self.current_player == BitBoard.FROG:
+            target = BOARD_N - 1
+        else:
+            target = 0
 
         # precompute heuristics per row
         compressions = self.get_all_compressions()
@@ -578,6 +581,17 @@ class BitBoard:
 
     def reconstruct_path(self, came_from, current: Coord):
         """Uses the came_from dictionary to reconstruct the path from the start"""
+        path = []
+        node = current
+        # Walk backwards from the goal
+        while node in came_from:
+            parent, action = came_from[node]
+            path.append((action, node))
+            node = parent
+
+        path.reverse()
+        return path
+
         total_path = []
         while current in came_from:
             current, move = came_from[current]
