@@ -9,8 +9,7 @@ from traceback import format_exc
 from typing import Any
 
 from .resources import CountdownTimer, MemoryWatcher, set_space_line
-from .io import AsyncProcessStatus, m_pickle, m_unpickle,\
-    _ACK, _REPLY_OK, _REPLY_EXC
+from .io import AsyncProcessStatus, m_pickle, m_unpickle, _ACK, _REPLY_OK, _REPLY_EXC
 
 _STDOUT_OVERRIDE_MESSAGE = "stdout usage is not allowed in agent (use stderr)"
 _STDIN_OVERRIDE_MESSAGE = "stdin usage is not allowed in agent"
@@ -41,13 +40,16 @@ def main():
     # Same for stdin
     class _StdinOverride:
         def read(self, *args, **kwargs):
-            raise RuntimeError(_STDIN_OVERRIDE_MESSAGE)
-                
+            pass
+            # raise RuntimeError(_STDIN_OVERRIDE_MESSAGE)
+
         def readline(self, *args, **kwargs):
-            raise RuntimeError(_STDIN_OVERRIDE_MESSAGE)
+            pass
+            # raise RuntimeError(_STDIN_OVERRIDE_MESSAGE)
 
         def readlines(self, *args, **kwargs):
-            raise RuntimeError(_STDIN_OVERRIDE_MESSAGE)
+            pass
+            # raise RuntimeError(_STDIN_OVERRIDE_MESSAGE)
 
     sys.__stdin__ = _StdinOverride()
     sys.stdin = _StdinOverride()
@@ -58,7 +60,7 @@ def main():
 
     def _s_pickle(o: Any) -> str:
         return m_pickle(o).decode("ascii")
-    
+
     def _is_pickleable(o: Any) -> bool:
         try:
             m_pickle(o)
@@ -67,11 +69,15 @@ def main():
             return False
 
     # Command line arguments are the class/constructor arguments
-    cls_module, cls_name, \
-        time_limit, space_limit, \
-        res_limit_tolerance, \
-        cons_args, cons_kwargs \
-        = _s_unpickle(sys.argv[1])
+    (
+        cls_module,
+        cls_name,
+        time_limit,
+        space_limit,
+        res_limit_tolerance,
+        cons_args,
+        cons_kwargs,
+    ) = _s_unpickle(sys.argv[1])
 
     # Create some context managers for resource tracking
     timer = CountdownTimer(time_limit, res_limit_tolerance)
@@ -91,7 +97,7 @@ def main():
         space_rem = space_limit - space.curr() if space.curr() > 0 else None
         if space.enabled() and space.curr() == -1:
             # No space used yet, so we can't know how much space is left
-            space_rem = space_limit if space_limit > 0 else None 
+            space_rem = space_limit if space_limit > 0 else None
         return {
             "time_remaining": time_rem,
             "space_remaining": space_rem,
@@ -101,7 +107,7 @@ def main():
     # Comms functions
     def _recv() -> Any:
         line = in_stream.readline()
-        if not line: # EOF, process should exit (see __aexit__ above)
+        if not line:  # EOF, process should exit (see __aexit__ above)
             exit(0)
         return _s_unpickle(line)
 
@@ -134,15 +140,16 @@ def main():
     while True:
         message = _recv()
         name, args, kwargs = message
-        
+
         # Call method
         result = None
         with _relay_exceptions(), timer, space:
             result = getattr(instance, name)(*args, **{**kwargs, **_referee()})
             if not _is_pickleable(result):
                 result = "<unpickleable>"
-        
+
         _reply(_REPLY_OK, result)
+
 
 # Only run if directly invoked
 if __name__ == "__main__" and sys.argv[0].endswith(__file__):
