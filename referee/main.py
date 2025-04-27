@@ -167,9 +167,16 @@ def main(options: Namespace | None = None):
         # Print the final result under all circumstances
         if game_result is None:
             rl.critical("result: draw")
+            with open("result.txt", "w") as fp:
+                fp.write("0\n")
         else:
             rl.critical(f"result: {agents[game_result]['name']}")
-
+            if game_result.color == PlayerColor.RED:
+                with open("result.txt", "w") as fp:
+                    fp.write("1")  # Red wins
+            else:
+                with open("result.txt", "w") as fp:
+                    fp.write("-1")
         exit(0)
 
     except InvalidAckError:

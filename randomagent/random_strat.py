@@ -15,6 +15,7 @@ class RandomStrat(Strategy):
         return RandomStrat(next_board)
 
     def best_action(self):
+        print(self.state.current_player)
         possible_moves = self.state.get_all_moves()
         if self.weighted:
             vert_dists = []

@@ -311,18 +311,14 @@ class BitBoard:
                     match self.current_player:
                         case BitBoard.FROG:
                             score += r
-                            break
                         case BitBoard.OPPONENT:
                             score += BOARD_N - 1 - r
-                            break
                 elif board[r][c] == opponent_player:
                     match self.current_player:
                         case BitBoard.FROG:
                             score -= BOARD_N - 1 - r
-                            break
                         case BitBoard.OPPONENT:
                             score -= r
-                            break
                     score -= (
                         BOARD_N - 1 - r
                     )  # still an error here, not calculated coorectl

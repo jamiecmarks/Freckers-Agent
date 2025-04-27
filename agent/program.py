@@ -5,7 +5,7 @@ from referee.game import PlayerColor, Coord, Direction, Action, MoveAction, Grow
 import numpy as np
 import random
 from .bitboard import BitBoard
-from .mcts import MonteCarloTreeSearchNode
+from .mcts import BruteForceSearchNode, MonteCarloTreeSearchNode
 from referee.game.constants import MAX_TURNS
 from .random_strat import RandomStrat
 
@@ -28,6 +28,7 @@ class Agent:
         bitboard = BitBoard()
 
         self.root = MonteCarloTreeSearchNode(bitboard)
+        # self.root = BruteForceSearchNode(bitboard)
 
     def action(self, **referee: dict) -> Action:
         """
@@ -56,6 +57,10 @@ class Agent:
         # action for demonstration purposes. You should replace this with your
         # own logic to update your agent's internal game state representation.
 
+
+        
+
+
         child = self.root.find_child(action)
 
         if child is None:
@@ -63,5 +68,6 @@ class Agent:
             new_board = self.root.state.move(action)
             new_board.toggle_player()
             child = MonteCarloTreeSearchNode(new_board)
+
 
         self.root = child
