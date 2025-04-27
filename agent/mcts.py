@@ -109,8 +109,7 @@ class MonteCarloTreeSearchNode(Strategy):
                     state.get_all_moves()
                 )  # the increase in moves that we get if we were to grow now
                 # score += +0.5 if (2 < depth and depth < 15) else 0.4
-                score += ratio
-
+                score += ratio * 0.8
             else:
                 # reward long jumps
                 dist = abs(res.r - action.coord.r)
@@ -185,15 +184,15 @@ class MonteCarloTreeSearchNode(Strategy):
         state = self.state
         depth = 0
         # if few lilies remain, let the playout run to a true end
-        lily_count = (state.get_board() == state.LILLY).sum()
-        if lily_count < BOARD_N:
-            max_depth = BOARD_N * BOARD_N  # effectively unlimited
-        else:
-            max_depth = 20
+        # lily_count = (state.get_board() == state.LILLY).sum()
+        # if lily_count < BOARD_N:
+        #     max_depth = BOARD_N * BOARD_N  # effectively unlimited
+        # else:
+        # max_depth = 20
         # state = self.state
         # depth = 0
         # max_depth = 50  # if depth < 50 else 150
-        max_depth = 30
+        max_depth = 20
 
         # fast, stateless playout on BitBoard only
         while not state.is_game_over() and depth < max_depth:
@@ -335,7 +334,7 @@ class MonteCarloTreeSearchNode(Strategy):
         )
         return best
 
-    def best_action(self, simulation_no=50):
+    def best_action(self, simulation_no=75):
         for _ in range(simulation_no):
             v = self.new_tree_policy()
             reward = v.simulate_playout()
