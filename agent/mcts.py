@@ -105,7 +105,12 @@ class MonteCarloTreeSearchNode(Strategy):
             score = 0.0
             if isinstance(action, GrowAction):
                 # early-game grow bonus, late-game penalty
-                score += +1 if (2 < depth < 15) else 0.4
+                ratio = len(state.move(action, None).get_all_moves()) / len(
+                    state.get_all_moves()
+                )  # the increase in moves that we get if we were to grow now
+                # score += +0.5 if (2 < depth and depth < 15) else 0.4
+                score += ratio
+
             else:
                 # reward long jumps
                 dist = abs(res.r - action.coord.r)
