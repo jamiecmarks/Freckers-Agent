@@ -128,6 +128,9 @@ class BitBoard:
                 if self.board[r][c] == self.current_player:
                     coord = Coord(r, c)
                     moves = self.get_possible_move(coord)
+                    # print(coord)
+                    # for move, res in moves:
+                    #     print(move, res)
                     possible_moves.extend(moves)
 
         # GrowAction always an option
@@ -152,9 +155,54 @@ class BitBoard:
                 board[BOARD_N - 1 - r][c] = self.LILLY
         return board
 
-    def get_possible_move(self, coord: Coord):
-        visited = set()
-        return self.get_possible_move_rec(coord, visited)
+    # def get_possible_move(self, coord: Coord):
+    #     visited = set()
+    #     return self.get_possible_move_rec(coord, visited)
+
+    def get_possible_move(  # _iterative(
+        self, coord: Coord
+    ) -> list[tuple[MoveAction, Coord]]:
+        possible_moves: list[tuple[MoveAction, Coord]] = []
+        forward = 1 if self.current_player == self.FROG else -1
+
+        # Each stack entry: (current_coord, directions from original coord, visited set, in_jump flag)
+        stack: list[tuple[Coord, list[Direction], set[Coord], bool]] = [
+            (coord, [], {coord}, False)
+        ]
+
+        while stack:
+            current, dirs, visited, in_jump = stack.pop()
+            for d in Direction:
+                # Single step:
+                if not in_jump:
+                    action = MoveAction(coord, dirs + [d])
+                    if self.is_valid_move(action, forward):
+                        dest = current + d
+                        possible_moves.append((action, dest))
+
+                # Attempt jump over adjacent piece:
+                try:
+                    mid = current + d
+                    dest = mid + d
+                except ValueError:
+                    continue
+
+                # Check jump conditions
+                if (
+                    self.board[mid.r][mid.c] in (self.FROG, self.OPPONENT)
+                    and dest not in visited
+                ):
+                    # is_valid_move expects a MoveAction at the landing spot?
+                    jump_action = MoveAction(current, [d])
+                    if self.is_valid_move(jump_action, forward):
+                        new_dirs = dirs + [d]
+                        # record this jump
+                        possible_moves.append((MoveAction(coord, new_dirs), dest))
+                        # continue exploring further jumps
+                        new_visited = visited | {dest}
+                        stack.append((dest, new_dirs, new_visited, True))
+
+        return possible_moves
 
     def get_possible_move_rec(self, coord, visited, in_jump=False):
         possible_jumps = []
