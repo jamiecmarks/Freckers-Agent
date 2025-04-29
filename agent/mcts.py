@@ -18,7 +18,16 @@ class MonteCarloTreeSearchNode(Strategy):
     ):
         self.state = state
         self.parent = parent
-        self.parent_action = parent_action  # (action, res)
+        self.parent_action = parent_action
+        if parent is None:
+            # only the root records who “we” are
+            self.root_player = state.get_current_player()
+            self.time_budget = time_budget
+        else:
+            # children inherit the real root’s identity & remaining clock
+            self.root_player = parent.root_player
+            self.time_budget = parent.time_budget
+
         self.children = []
         self._number_of_visits = 0
         self._results = defaultdict(int)
@@ -32,11 +41,6 @@ class MonteCarloTreeSearchNode(Strategy):
             self.depth = parent.depth + 1
         else:
             self.depth = 0
-
-        if parent is None:
-            self.time_budget = time_budget
-        else:
-            self.time_budget = parent.time_budget
 
     def untried_actions(self):
         return self.state.get_all_moves()
@@ -110,7 +114,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 winner_piece = BitBoard.OPPONENT
             else:
                 return 0  # draw
-            return +1 if winner_piece == self.state.get_current_player() else -1
+            return +1 if winner_piece == self.root_player else -1
 
         return 0  # if reached max depth -> draw
 

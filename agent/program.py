@@ -40,7 +40,6 @@ class Agent:
         # the initial moves of the game, so you should use some game playing
         # technique(s) to determine the best action to take.
 
-        # print(self.root.state.get_all_optimal_moves())
         action_out = self.root.best_action()  # simulate only as many moves as possible
 
         # print(action_out["res_node"].state.get_board())
@@ -63,7 +62,8 @@ class Agent:
             # create a new child node
             new_board = self.root.state.move(action)
             new_board.toggle_player()
-            new_board.ply_count += 1
             child = MonteCarloTreeSearchNode(new_board)
+
+        child.time_budget = referee["time_remaining"]
 
         self.root = child
