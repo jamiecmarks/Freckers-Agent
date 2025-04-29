@@ -26,7 +26,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._total_reward = 0
         self._untried_actions = self.untried_actions()
-        self.c = 0.25
+        self.c = np.sqrt(2)
 
         if parent:
             self.depth = parent.depth + 1
@@ -99,8 +99,18 @@ class MonteCarloTreeSearchNode(Strategy):
             ) / MonteCarloTreeSearchNode.playouts_done
 
         if state.is_game_over():
-            # print(state.render())
-            return state.get_winner()
+            # compute which side actually reached the goal
+            frog_count, opp_count = (
+                state.frog_border_count[BitBoard.FROG],
+                state.frog_border_count[BitBoard.OPPONENT],
+            )
+            if frog_count == BOARD_N - 2 and opp_count != BOARD_N - 2:
+                winner_piece = BitBoard.FROG
+            elif opp_count == BOARD_N - 2 and frog_count != BOARD_N - 2:
+                winner_piece = BitBoard.OPPONENT
+            else:
+                return 0  # draw
+            return +1 if winner_piece == self.state.get_current_player() else -1
 
         return 0  # if reached max depth -> draw
 
@@ -231,19 +241,6 @@ class MonteCarloTreeSearchNode(Strategy):
             "res": best_child.parent_action[1],
             "res_node": best_child,
         }
-
-    # def best_action(self, simulation_no=200):
-    #     for _ in range(simulation_no):
-    #         v = self.new_tree_policy()
-    #         reward = v.simulate_playout()
-    #         v.backpropagate(reward)
-    #
-    #     best = self.choose_next_action()
-    #     return {
-    #         "action": best.parent_action[0],
-    #         "res": best.parent_action[1],
-    #         "res_node": best,
-    #     }  # if best else None
 
     def find_child(self, action):
         for child in self.children:
