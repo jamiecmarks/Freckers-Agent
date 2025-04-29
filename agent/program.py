@@ -63,6 +63,7 @@ class Agent:
             # create a new child node
             new_board = self.root.state.move(action)
             new_board.toggle_player()
+            new_board.ply_count += 1
             child = MonteCarloTreeSearchNode(new_board)
 
         self.root = child

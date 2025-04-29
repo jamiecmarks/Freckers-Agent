@@ -27,3 +27,9 @@ python -m referee randomagent agent
 Here red will be a random agent and blue will be mcts, just swap arguments to change order.
 
 1. Although I've tried to make it smarter. In the start of the game it kind of plays like the random agent. Doesn't seem to smart. Maybe check that out
+
+
+# From tutor tips 
+Use cProfile for time limit stuff. 
+Use cProfile.run() and snakeviz another library to find the bottlenecks in your code.
+

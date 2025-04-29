@@ -26,6 +26,10 @@ class BitBoard:
         self.board = board
         self.current_player = self.FROG
         self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
+        self.ply_count = 0
+
+    def get_ply_count(self):
+        return self.ply_count
 
     def get_board(self):
         return self.board
@@ -106,6 +110,7 @@ class BitBoard:
 
         new_board = BitBoard(board_copy)
         new_board.current_player = self.current_player
+        new_board.ply_count = self.ply_count + 1
         return new_board
 
     def get_all_pos(self, pos_type):
