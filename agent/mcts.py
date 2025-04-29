@@ -43,6 +43,15 @@ class MonteCarloTreeSearchNode(Strategy):
             self.depth = 0
 
     def untried_actions(self):
+        blocked = False
+        for row in self.state.get_board():
+            if np.sum(row) == 0:  # there is a 'block'
+                blocked = True
+        if not blocked:
+            opt = self.state.get_all_optimal_moves()
+            # take the top 2–3 optimal, plus 30% of the rest at random
+            extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
+            return opt + extra
         return self.state.get_all_moves()
 
     def q(self):
@@ -76,7 +85,9 @@ class MonteCarloTreeSearchNode(Strategy):
             self.expand()
 
     def rollout_policy(self, state, depth=0):
-        pass
+        moves = state.get_all_moves()
+        action, res = random.choice(moves)
+        return action, res
 
     # new version of rollout
     def simulate_playout(self):
@@ -89,7 +100,7 @@ class MonteCarloTreeSearchNode(Strategy):
             if not moves:
                 break  # no legal moves, should count as loss/draw
 
-            action, res = random.choice(moves)  # <-- PURE RANDOM move
+            action, res = self.rollout_policy(state, depth)
             state = state.move(action, res)
             state.toggle_player()
 
@@ -208,38 +219,33 @@ class MonteCarloTreeSearchNode(Strategy):
         best = max(self.children, key=lambda c: c.n())
         return best
 
-    def best_action(self, safety_margin: float = 1.0):
-        # how many plies have actually been played?
+    def best_action(self, safety_margin: float = 1.0, beta: float = 0.75):
         moves_played = self.state.get_ply_count()
 
-        # predict total plies from our running average, or fall back
-        if MonteCarloTreeSearchNode.playouts_done > 0:
-            total_pred = MonteCarloTreeSearchNode.avg_playout_depth
-        else:
-            total_pred = 150.0
-
-        # estimate how many plies remain
+        total_pred = (
+            type(self).avg_playout_depth if type(self).playouts_done > 0 else 150.0
+        )
         moves_left = max(1, int(total_pred) - moves_played)
 
-        # allocate a fair share of the remaining clock
-        alloc_time = max(0.0, (self.time_budget - safety_margin) / moves_left)
+        # power‐law allocation
+        alloc_time = max(0.0, (self.time_budget - safety_margin) / (moves_left**beta))
 
-        # run sims for that slice
         start = time.perf_counter()
         deadline = start + alloc_time
+        sims = 0
         while time.perf_counter() < deadline:
             leaf = self.new_tree_policy()
             reward = leaf.simulate_playout()
             leaf.backpropagate(reward)
-        elapsed = time.perf_counter() - start
+            sims += 1
 
-        # update global budget
+        print(f"[MCTS] sims this move: {sims}")
+
+        elapsed = time.perf_counter() - start
         remaining = max(0.0, self.time_budget - elapsed)
 
-        # pick the child with most visits
         best_child = max(self.children, key=lambda c: c.n())
         best_child.time_budget = remaining
-
         return {
             "action": best_child.parent_action[0],
             "res": best_child.parent_action[1],
