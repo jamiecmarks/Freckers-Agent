@@ -250,24 +250,42 @@ class BitBoard:
 
         return possible_jumps
 
+    # has been optimized
     def is_valid_move(self, move: MoveAction, forward=1):
-        coord = move.coord
-        for i, direction in enumerate(move.directions):
-            if direction.r not in (forward, 0):
+        r, c = move.coord.r, move.coord.c
+        directions = move.directions
+        board = self.board
+        frog = self.FROG
+        opponent = self.OPPONENT
+        lilly = self.LILLY
+        board_n = BOARD_N
+
+        for i in range(len(directions)):
+            d = directions[i]
+            dr, dc = d.r, d.c
+
+            # Early exit if direction is not forward or lateral
+            if dr not in (forward, 0):
                 return False
-            next_c = coord.c + direction.c
-            next_r = coord.r + direction.r
-            if next_c < 0 or next_c >= BOARD_N or next_r < 0 or next_r >= BOARD_N:
+
+            r += dr
+            c += dc
+
+            # Bounds check
+            if not (0 <= r < board_n and 0 <= c < board_n):
                 return False
-            if i < len(move.directions) - 1:
-                # intermediate hop must jump over a piece
-                if self.board[next_r][next_c] not in (self.FROG, self.OPPONENT):
+
+            cell = board[r][c]
+
+            if i < len(directions) - 1:
+                # Intermediate hop must jump over a piece
+                if cell != frog and cell != opponent:
                     return False
             else:
-                # final landing cell must be a lily
-                if self.board[next_r][next_c] != self.LILLY:
+                # Final landing cell must be a lily
+                if cell != lilly:
                     return False
-            coord = Coord(next_r, next_c)
+
         return True
 
     def _move_priority(self, move):
