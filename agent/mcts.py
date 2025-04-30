@@ -35,7 +35,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._total_reward = 0
         self._untried_actions = self.untried_actions()
-        self.c = 0.5
+        self.c = 0.2
 
         if parent:
             self.depth = parent.depth + 1
@@ -43,15 +43,15 @@ class MonteCarloTreeSearchNode(Strategy):
             self.depth = 0
 
     def untried_actions(self):
-        # blocked = False
-        # for row in self.state.get_board():
-        #     if np.sum(row) == 0:  # there is a 'block'
-        #         blocked = True
-        # if not blocked:
-        #     opt = self.state.get_all_optimal_moves()
-        #     # take the top 2–3 optimal, plus 30% of the rest at random
-        #     extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
-        #     return opt + extra
+        blocked = False
+        for row in self.state.get_board():
+            if np.sum(row) == 0:  # there is a 'block'
+                blocked = True
+        if not blocked:
+            opt = self.state.get_all_optimal_moves()
+            # take the top 2–3 optimal, plus 30% of the rest at random
+            extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
+            return opt + extra
         return self.state.get_all_moves()
 
     def q(self):
@@ -65,16 +65,22 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def expand(self):
         # sort by heuristic priority once
-        if np.random.rand() < 0.1:
-            # 10% chance to expand a random untried action
-            idx = random.randrange(len(self._untried_actions))
-        else:
-            # otherwise take the highest‐priority one
-            self._untried_actions.sort(
-                key=lambda mv: self.state._move_priority(mv), reverse=True
-            )
-            idx = 0
+        self._untried_actions.sort(
+            key=lambda mv: self.state._move_priority(mv), reverse=True
+        )
+        idx = 0  # pop the very best move first
+        # action_res = self._untried_actions.pop()
 
+        # if self.depth < 5 and self.depth > 1:
+        #     # try to pop a GrowAction first
+        #     for i, (act, res) in enumerate(self._untried_actions):
+        #         if isinstance(act, GrowAction):
+        #             idx = i
+        #             break
+        #     else:
+        #         idx = np.random.randint(len(self._untried_actions))
+        # else:
+        #     idx = np.random.randint(len(self._untried_actions))
         action_res = self._untried_actions.pop(idx)
         action, res = action_res
         next_state = self.state.move(action, res)
@@ -103,13 +109,13 @@ class MonteCarloTreeSearchNode(Strategy):
         epsilon-greedy + softmax-weighted heuristic playout policy.
         """
         moves = state.get_all_moves()
-        return random.choice(moves)
         num_moves = len(moves)
-        # if num_moves == 0:
-        #     return None
+        if num_moves == 0:
+            return None
 
         # 1) ε-greedy: 10% of the time, explore uniformly at random
-        eps = 0.1 if depth > 15 else 0.1
+        #
+        eps = 0 if depth > 15 else 0.02
         if np.random.rand() < eps:
             return moves[np.random.randint(num_moves)]
 
@@ -120,11 +126,14 @@ class MonteCarloTreeSearchNode(Strategy):
             score = 0.0
             if isinstance(action, GrowAction):
                 # early-game grow bonus, late-game penalty
-                ratio = len(state.move(action, None).get_all_moves()) / len(
-                    state.get_all_moves()
-                )  # the increase in moves that we get if we were to grow now
-                # score += +0.5 if (2 < depth and depth < 15) else 0.4
-                score += ratio * 0.8
+                if self.state.get_ply_count() < 6:
+                    score = 0
+                else:
+                    score = 0.1
+                    # ratio = len(state.move(action, None).get_all_moves()) / len(
+                    #     state.get_all_moves()
+                    # )  # the increase in moves that we get if we were to grow now
+                    # score += +0.0 if (2 < depth and depth < 15) else ratio * 0.01
             else:
                 # reward long jumps
                 dist = abs(res.r - action.coord.r)
@@ -197,11 +206,11 @@ class MonteCarloTreeSearchNode(Strategy):
     # new version of rollout
     def simulate_playout(self):
         state = BitBoard(np.copy(self.state.get_board()))
-        state.current_player = self.state.get_current_player()
-
+        state.current_player = self.state.current_player
         depth = 0
         max_depth = 150 - self.state.get_ply_count()
 
+        # fast, stateless playout on BitBoard only
         while not state.is_game_over() and depth < max_depth:
             if False:
                 # using board eval
@@ -225,9 +234,7 @@ class MonteCarloTreeSearchNode(Strategy):
             if True:
                 # using rollout policy
                 action, res = self.new_rollout_policy(state, depth=depth)
-                state = state.move(
-                    action, res, in_place=True
-                )  # do in place to remove overhead from copying each time
+                state = state.move(action, res, in_place=True)  # for performance
                 state.toggle_player()
 
             # state.toggle_player()
@@ -256,9 +263,8 @@ class MonteCarloTreeSearchNode(Strategy):
                 return 0  # draw
             return +1 if winner_piece == self.root_player else -1
 
-        if not state.is_game_over():
-            return +1 if self.heuristic_score(state) > 0 else -1
-        return 0  # if reached max depth -> draw
+        return 1 if state.evaluate_position() > 0 else -1
+        # return 1 if self.heuristic_score(state) > 0 else -1
 
     def heuristic_score(self, state):
         score = 0
@@ -342,67 +348,67 @@ class MonteCarloTreeSearchNode(Strategy):
             exploration = self.dynamic_c() * np.sqrt(
                 (2 * np.log(self.n() + 1) / (c.n() + 1e-5))
             )
-            # priority_bonus = self.state._move_priority(c.parent_action)
-            scores.append(value + exploration)  # tune this
+            priority_bonus = self.state._move_priority(c.parent_action)
+            scores.append(value + exploration + 0.1 * priority_bonus)  # tune this
+        return self.children[np.argmax(scores)]
+
+        scores = [
+            (c.q() / c.n()) + self.dynamic_c() * np.sqrt((2 * np.log(self.n()) / c.n()))
+            for c in self.children
+        ]
         return self.children[np.argmax(scores)]
 
     def choose_next_action(self):
-        best = max(self.children, key=lambda c: c.n())
+        # break ties by winrate
+        best = max(
+            self.children,
+            key=lambda c: (c.n(), (self._results[1] / c.n()) if c.n() > 0 else 0),
+        )
         return best
 
-    def best_action(self, safety_margin: float = 0.05, beta: float = 0.75):
-        # how many plies have actually been played?
+    def best_action(self, safety_margin: float = 5, beta: float = 0.75):
+        # 1) grab the referee‐supplied clock once
+        total_time = self.time_budget
+        assert total_time > safety_margin, "No time to move!"
+
+        # 2) compute moves_left as before
         moves_played = self.state.get_ply_count()
-        # predict total plies from our running average, or fall back
         total_pred = (
             type(self).avg_playout_depth if type(self).playouts_done > 0 else 150.0
         )
         moves_left = max(1, int(total_pred) - moves_played)
 
-        # compute your “ideal” alloc_time via power‐law
-        raw_alloc = (self.time_budget - safety_margin) / (moves_left**beta)
+        # 3) ideal slice, then clamp below
+        raw_alloc = (total_time - safety_margin) / (moves_left**beta)
+        alloc_time = min(raw_alloc, total_time - safety_margin)
 
-        # 1) clamp to at most the actual remaining budget minus margin
-        per_move_alloc = min(raw_alloc, self.time_budget - safety_margin)
+        assert alloc_time >= 0
 
-        start = time.perf_counter()
-        deadline = start + per_move_alloc
+        # 4) establish one single *absolute* deadline
+        t0 = time.perf_counter()
+        hard_deadline = t0 + alloc_time
+
         sims = 0
-
-        if self.time_budget <= 0.0:
-            # break everything no time left
-            while True:
-                print("No time left!")
-        # 2) in‐loop guard: stop if we've used up the real budget
+        # 5) loop until *either* we hit the per‐move slice *or* the referee clock
         while True:
             now = time.perf_counter()
-            if now >= deadline:
+            if now >= hard_deadline:
                 break
-            # also ensure we never run past the *global* budget
-            if (now - start) >= (self.time_budget - safety_margin):
-                break
-
-            leaf = self._tree_policy()
+            # since hard_deadline = t0 + alloc_time ≤ t0 + (total_time - safety_margin),
+            # we are guaranteed never to go beyond the referee’s remaining clock.
+            leaf = self.new_tree_policy()
             reward = leaf.simulate_playout()
             leaf.backpropagate(reward)
             sims += 1
 
+        # 6) if you managed zero sims, force one expansion so you always return something
         if sims == 0:
-            # didn't get to run 1 sim
             self.new_tree_policy()
 
-        # how long we actually spent
-        elapsed = time.perf_counter() - start
-        # update the *global* remaining time budget
-        self.time_budget = max(0.0, self.time_budget - elapsed)
-
-        # pick best child and carry forward the leftover budget
+        # 7) pick the child with most visits
         best_child = max(self.children, key=lambda c: c.n())
-        best_child.time_budget = self.time_budget
 
-        # (optional) record sims for diagnostics
-        self.sims_this_move = sims
-        print(f"Simulations: {sims} (avg depth: {self.avg_playout_depth:.2f})")
+        print(f"[MCTS] sims this move: {sims}")
 
         return {
             "action": best_child.parent_action[0],

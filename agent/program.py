@@ -44,6 +44,8 @@ class Agent:
 
         profiler = cProfile.Profile()
         profiler.enable()
+
+        self.root.time_budget = referee["time_remaining"]
         action_out = self.root.best_action()  # simulate only as many moves as possible
 
         profiler.disable()
