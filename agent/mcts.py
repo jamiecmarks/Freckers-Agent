@@ -43,15 +43,15 @@ class MonteCarloTreeSearchNode(Strategy):
             self.depth = 0
 
     def untried_actions(self):
-        blocked = False
-        for row in self.state.get_board():
-            if np.sum(row) == 0:  # there is a 'block'
-                blocked = True
-        if not blocked:
-            opt = self.state.get_all_optimal_moves()
-            # take the top 2–3 optimal, plus 30% of the rest at random
-            extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
-            return opt + extra
+        # blocked = False
+        # for row in self.state.get_board():
+        #     if np.sum(row) == 0:  # there is a 'block'
+        #         blocked = True
+        # if not blocked:
+        #     opt = self.state.get_all_optimal_moves()
+        #     # take the top 2–3 optimal, plus 30% of the rest at random
+        #     extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
+        #     return opt + extra
         return self.state.get_all_moves()
 
     def q(self):
@@ -103,6 +103,7 @@ class MonteCarloTreeSearchNode(Strategy):
         epsilon-greedy + softmax-weighted heuristic playout policy.
         """
         moves = state.get_all_moves()
+        return random.choice(moves)
         num_moves = len(moves)
         # if num_moves == 0:
         #     return None
@@ -195,7 +196,9 @@ class MonteCarloTreeSearchNode(Strategy):
 
     # new version of rollout
     def simulate_playout(self):
-        state = self.state
+        state = BitBoard(np.copy(self.state.get_board()))
+        state.current_player = self.state.get_current_player()
+
         depth = 0
         max_depth = 150 - self.state.get_ply_count()
 
@@ -221,8 +224,10 @@ class MonteCarloTreeSearchNode(Strategy):
 
             if True:
                 # using rollout policy
-                action, res = self.rollout_policy(state, depth=depth)
-                state = state.move(action, res)
+                action, res = self.new_rollout_policy(state, depth=depth)
+                state = state.move(
+                    action, res, in_place=True
+                )  # do in place to remove overhead from copying each time
                 state.toggle_player()
 
             # state.toggle_player()
@@ -364,6 +369,10 @@ class MonteCarloTreeSearchNode(Strategy):
         deadline = start + per_move_alloc
         sims = 0
 
+        if self.time_budget <= 0.0:
+            # break everything no time left
+            while True:
+                print("No time left!")
         # 2) in‐loop guard: stop if we've used up the real budget
         while True:
             now = time.perf_counter()
@@ -373,10 +382,14 @@ class MonteCarloTreeSearchNode(Strategy):
             if (now - start) >= (self.time_budget - safety_margin):
                 break
 
-            leaf = self.new_tree_policy()
+            leaf = self._tree_policy()
             reward = leaf.simulate_playout()
             leaf.backpropagate(reward)
             sims += 1
+
+        if sims == 0:
+            # didn't get to run 1 sim
+            self.new_tree_policy()
 
         # how long we actually spent
         elapsed = time.perf_counter() - start

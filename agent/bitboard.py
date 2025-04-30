@@ -81,8 +81,11 @@ class BitBoard:
                 return 0
         return 0
 
-    def move(self, action: MoveAction, res: Coord | None = None):
-        board_copy = np.copy(self.board)
+    def move(self, action: MoveAction, res: Coord | None = None, in_place=False):
+        if in_place:
+            board_copy = self.board
+        else:
+            board_copy = np.copy(self.board)
         fill = self.current_player
 
         if isinstance(action, MoveAction):
