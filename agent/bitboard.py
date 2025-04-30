@@ -159,48 +159,53 @@ class BitBoard:
     #     visited = set()
     #     return self.get_possible_move_rec(coord, visited)
 
-    def get_possible_move(  # _iterative(
-        self, coord: Coord
-    ) -> list[tuple[MoveAction, Coord]]:
+    def get_possible_move(self, coord: Coord) -> list[tuple[MoveAction, Coord]]:
+        """
+        Iterative version matching recursive semantics exactly, including multi-jump chains.
+        """
         possible_moves: list[tuple[MoveAction, Coord]] = []
         forward = 1 if self.current_player == self.FROG else -1
 
-        # Each stack entry: (current_coord, directions from original coord, visited set, in_jump flag)
+        # Stack entries: (current_coord, path_dirs, visited_set, in_jump_flag)
         stack: list[tuple[Coord, list[Direction], set[Coord], bool]] = [
             (coord, [], {coord}, False)
         ]
 
         while stack:
-            current, dirs, visited, in_jump = stack.pop()
-            for d in Direction:
-                # Single step:
-                if not in_jump:
-                    action = MoveAction(coord, dirs + [d])
-                    if self.is_valid_move(action, forward):
-                        dest = current + d
-                        possible_moves.append((action, dest))
+            current, path_dirs, visited, in_jump = stack.pop()
 
-                # Attempt jump over adjacent piece:
+            for direction in Direction:
+                # Single-step moves (only when not in a jump sequence)
+                if not in_jump:
+                    single = MoveAction(current, [direction])
+                    if self.is_valid_move(single, forward):
+                        dest = current + direction
+                        possible_moves.append((single, dest))
+
+                # Attempt jump: piece at mid, landing beyond
                 try:
-                    mid = current + d
-                    dest = mid + d
+                    mid = current + direction
+                    landing = mid + direction
                 except ValueError:
                     continue
 
-                # Check jump conditions
                 if (
                     self.board[mid.r][mid.c] in (self.FROG, self.OPPONENT)
-                    and dest not in visited
+                    and landing not in visited
                 ):
-                    # is_valid_move expects a MoveAction at the landing spot?
-                    jump_action = MoveAction(current, [d])
-                    if self.is_valid_move(jump_action, forward):
-                        new_dirs = dirs + [d]
-                        # record this jump
-                        possible_moves.append((MoveAction(coord, new_dirs), dest))
-                        # continue exploring further jumps
-                        new_visited = visited | {dest}
-                        stack.append((dest, new_dirs, new_visited, True))
+                    # Validate jump from the intermediate square (same as recursive)
+                    jump_check = MoveAction(mid, [direction])
+                    if self.is_valid_move(jump_check, forward):
+                        # Build full sequence from original
+                        full_dirs = path_dirs + [direction]
+                        move_action = MoveAction(coord, full_dirs)
+
+                        # Record this jump at its landing spot
+                        possible_moves.append((move_action, landing))
+
+                        # Continue exploring further jumps
+                        new_visited = visited | {landing}
+                        stack.append((landing, full_dirs, new_visited, True))
 
         return possible_moves
 

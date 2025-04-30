@@ -8,6 +8,8 @@ from .bitboard import BitBoard
 from .mcts import MonteCarloTreeSearchNode
 from referee.game.constants import MAX_TURNS
 from .random_strat import RandomStrat
+import cProfile
+import pstats
 
 
 class Agent:
@@ -40,7 +42,17 @@ class Agent:
         # the initial moves of the game, so you should use some game playing
         # technique(s) to determine the best action to take.
 
+        profiler = cProfile.Profile()
+        profiler.enable()
         action_out = self.root.best_action()  # simulate only as many moves as possible
+
+        profiler.disable()
+
+        stats = pstats.Stats(profiler)
+
+        stats.strip_dirs().sort_stats("cumulative")
+        # Save profiling data for later analysis
+        stats.dump_stats("mcts_profile.prof")
 
         # print(action_out["res_node"].state.get_board())
         return action_out["action"]
