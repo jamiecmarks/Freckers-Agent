@@ -20,6 +20,11 @@ class BitBoard:
     RIGHT = 1
     SAME = 0
 
+    # Precompute (dr, dc) and Direction enum pairs once at import
+    _OFFSETS: list[tuple[int, int, Direction]] = [
+        (d.value.r, d.value.c, d) for d in Direction
+    ]
+
     def __init__(self, board=None):
         if board is None:
             board = self.get_start_board()
@@ -161,51 +166,56 @@ class BitBoard:
 
     def get_possible_move(self, coord: Coord) -> list[tuple[MoveAction, Coord]]:
         """
-        Iterative version matching recursive semantics exactly, including multi-jump chains.
+        Move-generation using primitive ints and per-path visited sets to avoid shared-state bugs.
         """
         possible_moves: list[tuple[MoveAction, Coord]] = []
         forward = 1 if self.current_player == self.FROG else -1
 
-        # Stack entries: (current_coord, path_dirs, visited_set, in_jump_flag)
-        stack: list[tuple[Coord, list[Direction], set[Coord], bool]] = [
-            (coord, [], {coord}, False)
+        start_r, start_c = coord.r, coord.c
+        # Each stack frame: (r, c, path_dirs, visited_set, in_jump)
+        stack: list[tuple[int, int, list[Direction], set[tuple[int, int]], bool]] = [
+            (start_r, start_c, [], {(start_r, start_c)}, False)
         ]
 
+        # Localize attributes for speed
+        board = self.board
+        is_valid = self.is_valid_move
+        F, O = self.FROG, self.OPPONENT
+        N = BOARD_N
+
         while stack:
-            current, path_dirs, visited, in_jump = stack.pop()
-
-            for direction in Direction:
-                # Single-step moves (only when not in a jump sequence)
+            r, c, path_dirs, visited, in_jump = stack.pop()
+            for dr, dc, direction in self._OFFSETS:
+                # Single-step (only if not already jumping)
                 if not in_jump:
-                    single = MoveAction(current, [direction])
-                    if self.is_valid_move(single, forward):
-                        dest = current + direction
-                        possible_moves.append((single, dest))
+                    move = MoveAction(Coord(r, c), [direction])
+                    if is_valid(move, forward):
+                        dest_r, dest_c = r + dr, c + dc
+                        possible_moves.append((move, Coord(dest_r, dest_c)))
 
-                # Attempt jump: piece at mid, landing beyond
-                try:
-                    mid = current + direction
-                    landing = mid + direction
-                except ValueError:
-                    continue
-
+                # Attempt a jump
+                mid_r, mid_c = r + dr, c + dc
+                land_r, land_c = mid_r + dr, mid_c + dc
+                # Bounds + occupied + not yet visited
                 if (
-                    self.board[mid.r][mid.c] in (self.FROG, self.OPPONENT)
-                    and landing not in visited
+                    0 <= mid_r < N
+                    and 0 <= mid_c < N
+                    and 0 <= land_r < N
+                    and 0 <= land_c < N
+                    and board[mid_r][mid_c] in (F, O)
+                    and (land_r, land_c) not in visited
                 ):
-                    # Validate jump from the intermediate square (same as recursive)
-                    jump_check = MoveAction(mid, [direction])
-                    if self.is_valid_move(jump_check, forward):
-                        # Build full sequence from original
-                        full_dirs = path_dirs + [direction]
-                        move_action = MoveAction(coord, full_dirs)
+                    # Validate hop
+                    hop_check = MoveAction(Coord(mid_r, mid_c), [direction])
+                    if is_valid(hop_check, forward):
+                        new_dirs = path_dirs + [direction]
+                        action = MoveAction(coord, new_dirs)
+                        possible_moves.append((action, Coord(land_r, land_c)))
 
-                        # Record this jump at its landing spot
-                        possible_moves.append((move_action, landing))
-
-                        # Continue exploring further jumps
-                        new_visited = visited | {landing}
-                        stack.append((landing, full_dirs, new_visited, True))
+                        # Create a new visited set for this path to avoid interference
+                        new_visited = visited.copy()
+                        new_visited.add((land_r, land_c))
+                        stack.append((land_r, land_c, new_dirs, new_visited, True))
 
         return possible_moves
 
