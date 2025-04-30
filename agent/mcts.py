@@ -35,7 +35,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._total_reward = 0
         self._untried_actions = self.untried_actions()
-        self.c = np.sqrt(2)
+        self.c = 0.5
 
         if parent:
             self.depth = parent.depth + 1
@@ -50,8 +50,8 @@ class MonteCarloTreeSearchNode(Strategy):
         if not blocked:
             opt = self.state.get_all_optimal_moves()
             # take the top 2–3 optimal, plus 30% of the rest at random
-            # extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
-            return opt  # + extra
+            extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
+            return opt + extra
         return self.state.get_all_moves()
 
     def q(self):
@@ -65,22 +65,16 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def expand(self):
         # sort by heuristic priority once
-        self._untried_actions.sort(
-            key=lambda mv: self.state._move_priority(mv), reverse=True
-        )
-        idx = 0  # pop the very best move first
-        # action_res = self._untried_actions.pop()
+        if np.random.rand() < 0.1:
+            # 10% chance to expand a random untried action
+            idx = random.randrange(len(self._untried_actions))
+        else:
+            # otherwise take the highest‐priority one
+            self._untried_actions.sort(
+                key=lambda mv: self.state._move_priority(mv), reverse=True
+            )
+            idx = 0
 
-        # if self.depth < 5 and self.depth > 1:
-        #     # try to pop a GrowAction first
-        #     for i, (act, res) in enumerate(self._untried_actions):
-        #         if isinstance(act, GrowAction):
-        #             idx = i
-        #             break
-        #     else:
-        #         idx = np.random.randint(len(self._untried_actions))
-        # else:
-        #     idx = np.random.randint(len(self._untried_actions))
         action_res = self._untried_actions.pop(idx)
         action, res = action_res
         next_state = self.state.move(action, res)
@@ -114,7 +108,7 @@ class MonteCarloTreeSearchNode(Strategy):
         #     return None
 
         # 1) ε-greedy: 10% of the time, explore uniformly at random
-        eps = 0 if depth > 15 else 0.02
+        eps = 0.1 if depth > 15 else 0.1
         if np.random.rand() < eps:
             return moves[np.random.randint(num_moves)]
 
@@ -237,12 +231,11 @@ class MonteCarloTreeSearchNode(Strategy):
             # state.toggle_player()
             depth += 1
 
-        if self.depth == 0:
-            MonteCarloTreeSearchNode.playouts_done += 1
-            # incremental average
-            MonteCarloTreeSearchNode.avg_playout_depth += (
-                depth - MonteCarloTreeSearchNode.avg_playout_depth
-            ) / MonteCarloTreeSearchNode.playouts_done
+        MonteCarloTreeSearchNode.playouts_done += 1
+        # incremental average
+        MonteCarloTreeSearchNode.avg_playout_depth += (
+            depth - MonteCarloTreeSearchNode.avg_playout_depth
+        ) / MonteCarloTreeSearchNode.playouts_done
 
         if state.is_game_over():
             # compute which side actually reached the goal
@@ -258,6 +251,8 @@ class MonteCarloTreeSearchNode(Strategy):
                 return 0  # draw
             return +1 if winner_piece == self.root_player else -1
 
+        if not state.is_game_over():
+            return +1 if self.heuristic_score(state) > 0 else -1
         return 0  # if reached max depth -> draw
 
     def heuristic_score(self, state):
@@ -350,33 +345,52 @@ class MonteCarloTreeSearchNode(Strategy):
         best = max(self.children, key=lambda c: c.n())
         return best
 
-    def best_action(self, safety_margin: float = 1.0, beta: float = 0.75):
+    def best_action(self, safety_margin: float = 0.05, beta: float = 0.75):
+        # how many plies have actually been played?
         moves_played = self.state.get_ply_count()
-
+        # predict total plies from our running average, or fall back
         total_pred = (
             type(self).avg_playout_depth if type(self).playouts_done > 0 else 150.0
         )
         moves_left = max(1, int(total_pred) - moves_played)
 
-        # power‐law allocation
-        alloc_time = max(0.0, (self.time_budget - safety_margin) / (moves_left**beta))
+        # compute your “ideal” alloc_time via power‐law
+        raw_alloc = (self.time_budget - safety_margin) / (moves_left**beta)
+
+        # 1) clamp to at most the actual remaining budget minus margin
+        per_move_alloc = min(raw_alloc, self.time_budget - safety_margin)
 
         start = time.perf_counter()
-        deadline = start + alloc_time
+        deadline = start + per_move_alloc
         sims = 0
-        while time.perf_counter() < deadline:
+
+        # 2) in‐loop guard: stop if we've used up the real budget
+        while True:
+            now = time.perf_counter()
+            if now >= deadline:
+                break
+            # also ensure we never run past the *global* budget
+            if (now - start) >= (self.time_budget - safety_margin):
+                break
+
             leaf = self.new_tree_policy()
             reward = leaf.simulate_playout()
             leaf.backpropagate(reward)
             sims += 1
 
-        print(f"[MCTS] sims this move: {sims}")
-
+        # how long we actually spent
         elapsed = time.perf_counter() - start
-        remaining = max(0.0, self.time_budget - elapsed)
+        # update the *global* remaining time budget
+        self.time_budget = max(0.0, self.time_budget - elapsed)
 
+        # pick best child and carry forward the leftover budget
         best_child = max(self.children, key=lambda c: c.n())
-        best_child.time_budget = remaining
+        best_child.time_budget = self.time_budget
+
+        # (optional) record sims for diagnostics
+        self.sims_this_move = sims
+        print(f"Simulations: {sims} (avg depth: {self.avg_playout_depth:.2f})")
+
         return {
             "action": best_child.parent_action[0],
             "res": best_child.parent_action[1],
