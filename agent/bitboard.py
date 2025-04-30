@@ -251,40 +251,52 @@ class BitBoard:
         return possible_jumps
 
     # has been optimized
-    def is_valid_move(self, move: MoveAction, forward=1):
+
+    def is_valid_move(self, move: MoveAction, forward: int = 1) -> bool:
+        # 1) Localize everything
         r, c = move.coord.r, move.coord.c
         directions = move.directions
+        n_dirs = len(directions)
         board = self.board
-        frog = self.FROG
-        opponent = self.OPPONENT
-        lilly = self.LILLY
-        board_n = BOARD_N
+        FROG, OPP, LILLY = self.FROG, self.OPPONENT, self.LILLY
+        bn = BOARD_N
 
-        for i in range(len(directions)):
-            d = directions[i]
+        # 2) Precompute a bitmask for “is frog or opponent?”
+        #    (if your enums are bit‐flags, else omit this)
+        foe_mask = FROG | OPP
+
+        # 3) Loop without enumerate(), avoid tuple unpacking & attribute lookups
+        for idx in range(n_dirs):
+            d = directions[idx]
             dr, dc = d.r, d.c
 
-            # Early exit if direction is not forward or lateral
-            if dr not in (forward, 0):
+            # 4) Fast forward check
+            if dr != forward and dr != 0:
                 return False
 
-            r += dr
-            c += dc
+            # 5) Compute new row/col
+            nr = r + dr
+            nc = c + dc
 
-            # Bounds check
-            if not (0 <= r < board_n and 0 <= c < board_n):
+            # 6) Single bounds check
+            if not (0 <= nr < bn and 0 <= nc < bn):
                 return False
 
-            cell = board[r][c]
+            cell = board[nr][nc]
 
-            if i < len(directions) - 1:
-                # Intermediate hop must jump over a piece
-                if cell != frog and cell != opponent:
+            # 7) Intermediate or final check
+            if idx < n_dirs - 1:
+                # must be a piece (frog or opp)
+                # using bitmask test is slightly faster than "cell != A and cell != B"
+                if (cell & foe_mask) == 0:
                     return False
             else:
-                # Final landing cell must be a lily
-                if cell != lilly:
+                # landing must be lily
+                if cell != LILLY:
                     return False
+
+            # 8) Advance for the next iteration
+            r, c = nr, nc
 
         return True
 

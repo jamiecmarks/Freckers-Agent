@@ -43,15 +43,15 @@ class MonteCarloTreeSearchNode(Strategy):
             self.depth = 0
 
     def untried_actions(self):
-        # blocked = False
-        # for row in self.state.get_board():
-        #     if np.sum(row) == 0:  # there is a 'block'
-        #         blocked = True
-        # if not blocked:
-        #     opt = self.state.get_all_optimal_moves()
-        #     # take the top 2–3 optimal, plus 30% of the rest at random
-        #     extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
-        #     return opt + extra
+        blocked = False
+        for row in self.state.get_board():
+            if np.sum(row) == 0:  # there is a 'block'
+                blocked = True
+        if not blocked:
+            opt = self.state.get_all_optimal_moves()
+            # take the top 2–3 optimal, plus 30% of the rest at random
+            extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
+            return opt + extra
         return self.state.get_all_moves()
 
     def q(self):
