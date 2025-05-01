@@ -167,6 +167,26 @@ class BitBoard:
     #     visited = set()
     #     return self.get_possible_move_rec(coord, visited)
 
+    def simple_eval(self):
+        print(self.current_player)
+        # If frog, we are moving towards the bottom
+        board = self.board
+        progress = 0
+        if self.current_player == BitBoard.FROG:
+            for r in range(BOARD_N): 
+                for c in range(BOARD_N):
+                    if board[r][c] == BitBoard.FROG:
+                        progress += (r+1)
+        if self.current_player == BitBoard.OPPONENT:
+            for r in range(BOARD_N):
+                for c in range(BOARD_N):
+                    if board[r][c] == BitBoard.OPPONENT:
+                        progress += (8 - (r+1))
+        return progress/64
+
+
+
+
     def get_possible_move(self, coord: Coord) -> list[tuple[MoveAction, Coord]]:
         """
         Move-generation using primitive ints and per-path visited sets to avoid shared-state bugs.
@@ -428,7 +448,7 @@ class BitBoard:
                     adjacent.append(Coord(next_r, next_c))
         return len(adjacent)
 
-    def evaluate_position(self):
+    def evaluate_position(self, simple = True):
         """Heuristic function that figures out
         whether a move is generally better for
         a given side
@@ -477,11 +497,18 @@ class BitBoard:
                     score -= (
                         BOARD_N - 1 - r
                     )  # still an error here, not calculated coorectl
+        if simple:
+            return score/64
+
         score = scaled_sigmoid(score, input_range=10)
         cluster_score = self.clustering_score()
 
         weighted_score = (5 * score + 3 * skip_advantage + cluster_score) / 9
-        return 2 * weighted_score - 1
+        if weighted_score < 0.1:
+            return 0.1
+        if weighted_score > 0.9:
+             return 0.9
+        return weighted_score
         # print(weighted_score)
         # print(self.render())
         if weighted_score > 0.5:

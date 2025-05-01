@@ -10,6 +10,7 @@ from referee.game.constants import MAX_TURNS
 from .random_strat import RandomStrat
 import cProfile
 import pstats
+from .minimax import MinimaxSearchNode
 
 
 class Agent:
@@ -28,8 +29,9 @@ class Agent:
 
         self.total_moves = 0
         bitboard = BitBoard()
+        self.root = MinimaxSearchNode(bitboard)
 
-        self.root = MonteCarloTreeSearchNode(bitboard)
+
 
     def action(self, **referee: dict) -> Action:
         """
@@ -76,7 +78,7 @@ class Agent:
             # create a new child node
             new_board = self.root.state.move(action)
             new_board.toggle_player()
-            child = MonteCarloTreeSearchNode(new_board)
+            child = MinimaxSearchNode(new_board)
 
         child.time_budget = referee["time_remaining"]
 
