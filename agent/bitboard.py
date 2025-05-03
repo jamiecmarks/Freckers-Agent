@@ -129,22 +129,56 @@ class BitBoard:
                     out.append(Coord(r, c))
         return out
 
-    def get_all_moves(self):
+    def _cached_moves(board_bytes: bytes, player: int, dtype_str: str):
+        """
+        Reconstruct a bitboard from its raw bytes + player, then
+        call the *uncached* move generator.
+        """
+        # rebuild the numpy array in the right dtype & shape:
+        arr = np.frombuffer(board_bytes, dtype=np.dtype(dtype_str)).copy()
+        arr = arr.reshape((BOARD_N, BOARD_N))
+
+        bb = BitBoard(arr)
+        bb.current_player = player
+        return bb._all_moves_uncached()
+
+    def _all_moves_uncached(self):
+        """
+        Your existing get_all_moves logic, but *without*
+        the tobytes/cache wrapper.  For example:
+        """
         possible_moves = []
         for r in range(BOARD_N):
             for c in range(BOARD_N):
                 if self.board[r][c] == self.current_player:
-                    coord = Coord(r, c)
-                    moves = self.get_possible_move(coord)
-                    # print(coord)
-                    # for move, res in moves:
-                    #     print(move, res)
-                    possible_moves.extend(moves)
+                    possible_moves.extend(self.get_possible_move(Coord(r, c)))
 
-        # GrowAction always an option
         possible_moves.append((GrowAction(), None))
-        # cache the base list, but return a copy to callers
-        return possible_moves.copy()
+        return possible_moves
+
+    def get_all_moves(self):
+        bts = self.board.tobytes()
+
+        moves = BitBoard._cached_moves(bts, self.current_player, self.board.dtype.str)
+
+        return moves.copy()
+
+    # def get_all_moves(self):
+    #     possible_moves = []
+    #     for r in range(BOARD_N):
+    #         for c in range(BOARD_N):
+    #             if self.board[r][c] == self.current_player:
+    #                 coord = Coord(r, c)
+    #                 moves = self.get_possible_move(coord)
+    #                 # print(coord)
+    #                 # for move, res in moves:
+    #                 #     print(move, res)
+    #                 possible_moves.extend(moves)
+    #
+    #     # GrowAction always an option
+    #     possible_moves.append((GrowAction(), None))
+    #     # cache the base list, but return a copy to callers
+    #     return possible_moves.copy()
 
     def get_start_board(self):
         board = np.full((BOARD_N, BOARD_N), self.EMPTY, dtype=int)

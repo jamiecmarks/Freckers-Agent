@@ -6,6 +6,7 @@ from referee.game.actions import GrowAction, MoveAction
 from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
+import math
 import time
 
 
@@ -35,7 +36,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._total_reward = 0
         self._untried_actions = self.untried_actions()
-        self.c = 0.2
+        self.c = 0.5
 
         if parent:
             self.depth = parent.depth + 1
@@ -47,11 +48,44 @@ class MonteCarloTreeSearchNode(Strategy):
         for row in self.state.get_board():
             if np.sum(row) == 0:  # there is a 'block'
                 blocked = True
+                break
+
         if not blocked:
             opt = self.state.get_all_optimal_moves()
             # take the top 2–3 optimal, plus 30% of the rest at random
-            extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
-            return opt + extra
+            extra = random.sample(
+                self.state.get_all_moves()[:-1], k=int(0.3 * len(opt))
+            )
+            all_moves = opt[:-1] + extra + [(GrowAction(), None)]
+        else:
+            all_moves = self.state.get_all_moves()
+
+        hops = all_moves[:-1]
+        grows = all_moves[-1:]
+
+        # early in the search: explore hops first
+        # if self.n() < 5 and hops:
+        #     return hops
+
+        # once we've visited this node a handful of times,
+        # add Grow back in, sorted by priority
+        actions = hops + grows
+        actions.sort(key=lambda mv: self.state._move_priority(mv), reverse=True)
+
+        return actions
+
+    def kuntried_actions(self):
+        blocked = False
+        for row in self.state.get_board():
+            if np.sum(row) == 0:  # there is a 'block'
+                blocked = True
+        if not blocked:
+            opt = self.state.get_all_optimal_moves()
+            # take the top 2–3 optimal, plus 30% of the rest at random
+            extra = random.sample(
+                self.state.get_all_moves()[:-1], k=int(0.3 * len(opt))
+            )
+            return opt[:-1] + extra + [(GrowAction(), None)]
         return self.state.get_all_moves()
 
     def q(self):
@@ -123,17 +157,14 @@ class MonteCarloTreeSearchNode(Strategy):
         mid_col = (BOARD_N - 1) // 2
         scores = []
         for action, res in moves:
+            res_state = state.move(action, res)
             score = 0.0
-            if isinstance(action, GrowAction):
+            if res is None:  # grow action
                 # early-game grow bonus, late-game penalty
-                if self.state.get_ply_count() < 6:
-                    score = 0
-                else:
-                    score = 0.1
-                    # ratio = len(state.move(action, None).get_all_moves()) / len(
-                    #     state.get_all_moves()
-                    # )  # the increase in moves that we get if we were to grow now
-                    # score += +0.0 if (2 < depth and depth < 15) else ratio * 0.01
+                ratio = len(res_state.get_all_moves()) / len(
+                    state.get_all_moves()
+                )  # the increase in moves that we get if we were to grow now
+                score += ratio * 0.1
             else:
                 # reward long jumps
                 dist = abs(res.r - action.coord.r)
@@ -143,6 +174,17 @@ class MonteCarloTreeSearchNode(Strategy):
                     start_c, end_c = action.coord.c, res.c
                     if abs(start_c - mid_col) > abs(end_c - mid_col):
                         score += 0.1
+
+                coords = state.get_all_pos(res_state.get_current_player())
+
+                rows = [r for (r, _) in coords]
+                mean_r = sum(rows) / len(coords)  # mean row of frogs
+                spread = sum(
+                    (r - mean_r) ** 2 for r in rows
+                )  # find variance of frog rows, penalize too much spreading. Leaving froggy behind
+
+                score -= 0.1 * spread
+
             scores.append(score)
 
         # 3) Softmax to get a probability distribution
@@ -168,7 +210,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
         for action, res in moves:
             score = 0
-            if isinstance(action, GrowAction):
+            if res is None:  # grow action
                 score += 0.4 if (depth < 15 and depth > 2) else -0.2
             else:
                 # e.g. reward long jumps, centering, etc.
@@ -336,6 +378,35 @@ class MonteCarloTreeSearchNode(Strategy):
         return node
 
     def UCB_choose(self):
+        best, best_score = None, -1e9
+        totalN = self.n() + 1
+        for child in self.children:
+            q = child.q()
+            n = child.n()
+            exploit = q / (n + 1e-6)
+            explore = self.c * math.sqrt(2 * math.log(totalN) / (n + 1e-6))
+
+            # a quick “grow‐worth” estimate:
+            action, res = child.parent_action
+            if res is None:  # grow action
+                # how many new hops does grow give you?
+                after = child.state.get_all_moves()
+                before = self.state.get_all_moves()
+                grow_delta = len(after) - len(before)
+
+                if grow_delta <= 0:
+                    grow_bonus = -1.0  # kill pointless grows
+                else:
+                    grow_bonus = +0.2 * grow_delta
+            else:
+                grow_bonus = 0
+
+            score = exploit + explore + grow_bonus
+            if score > best_score:
+                best, best_score = child, score
+        return best
+
+    def kUCB_choose(self):
         # return self.best_child()
         for child in self.children:
             if child.n() == 0:
@@ -366,29 +437,28 @@ class MonteCarloTreeSearchNode(Strategy):
         )
         return best
 
-    def best_action(self, safety_margin: float = 5, beta: float = 0.75):
-        # 1) grab the referee‐supplied clock once
-        total_time = self.time_budget
-        assert total_time > safety_margin, "No time to move!"
-
-        # 2) compute moves_left as before
-        moves_played = self.state.get_ply_count()
-        total_pred = (
-            type(self).avg_playout_depth if type(self).playouts_done > 0 else 150.0
-        )
-        moves_left = max(1, int(total_pred) - moves_played)
-
-        # 3) ideal slice, then clamp below
-        raw_alloc = (total_time - safety_margin) / (moves_left**beta)
-        alloc_time = min(raw_alloc, total_time - safety_margin)
-
-        assert alloc_time >= 0
-
-        # 4) establish one single *absolute* deadline
+    def best_action(self, safety_margin: float = 0.5, decay: float = 0.95):
+        # 1) snapshot
         t0 = time.perf_counter()
+        rem_clock = self.time_budget - safety_margin
+        assert rem_clock > 0, "no clock left!"
+
+        # 2) count how many plies have been played (total, both sides)
+        moves_played = self.state.get_ply_count() // 2
+        # clamp to [0,150]
+        moves_played = min(max(moves_played, 0), 150 // 2)
+
+        sum_geom = decay**moves_played - decay ** (150 // 2)
+        weight = (1 - decay) * decay**moves_played / sum_geom
+
+        # 5) allocate exactly that fraction of rem_clock to *this* move
+        alloc_time = rem_clock * weight
+
+        # 6) now run MCTS until we hit our hard deadline
         hard_deadline = t0 + alloc_time
 
         sims = 0
+
         # 5) loop until *either* we hit the per‐move slice *or* the referee clock
         while True:
             now = time.perf_counter()

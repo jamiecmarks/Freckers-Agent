@@ -16,6 +16,8 @@ class RandomStrat(Strategy):
 
     def best_action(self):
         possible_moves = self.state.get_all_moves()
+        if len(possible_moves) == 2:
+            return {"action": possible_moves[0][0]}
         if self.weighted:
             vert_dists = []
             for mv, res in possible_moves:
