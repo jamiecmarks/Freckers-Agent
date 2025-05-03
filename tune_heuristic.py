@@ -81,7 +81,7 @@ def dump_weights(weights, path="weights.json"):
 def main(n_games=500):
     with open("weights.json", "r") as f:
         initial = json.load(f)
-    tuner = HeuristicTuner(initial, perturbation=0.03)
+    tuner = HeuristicTuner(initial, perturbation=0.02)
     Path("results.txt").write_text("0")
 
     prev_wins = 0
@@ -94,7 +94,6 @@ def main(n_games=500):
             # **No --weights flag here!**
             subprocess.run(
                 [sys.executable, "-m", "referee", "agent", "randomagent"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
             
             with open("results.txt", "r") as f:
@@ -114,6 +113,10 @@ def main(n_games=500):
             if i%10 == 0:
                 print("Average last 10: ", sum(last_10)*10, "% winrate")
             won = (new_wins > prev_wins)
+            if won:
+                print(f"Game {i} won")
+            else:
+                print(f"Game {i} lost")
 
             # 5) feed result into tuner
             tuner.evaluate_outcome(won)
@@ -124,7 +127,7 @@ def main(n_games=500):
             pbar.update(1)
 
     wins = int(Path("results.txt").read_text().strip() or "0")
-    print(f"\nFinal Success Rate: {wins / n_games * n_games:.2f}%")
+    print(f"\nFinal Success Rate: {wins / n_games:.2f}%")
 
 if __name__ == "__main__":
     n = int(sys.argv[1]) if len(sys.argv)>1 else 100
