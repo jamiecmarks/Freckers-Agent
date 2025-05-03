@@ -167,22 +167,6 @@ class BitBoard:
     #     visited = set()
     #     return self.get_possible_move_rec(coord, visited)
 
-    def simple_eval(self):
-        print(self.current_player)
-        # If frog, we are moving towards the bottom
-        board = self.board
-        progress = 0
-        if self.current_player == BitBoard.FROG:
-            for r in range(BOARD_N): 
-                for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.FROG:
-                        progress += (r+1)
-        if self.current_player == BitBoard.OPPONENT:
-            for r in range(BOARD_N):
-                for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.OPPONENT:
-                        progress += (8 - (r+1))
-        return progress/64
 
 
 
@@ -585,6 +569,7 @@ class BitBoard:
     def get_all_optimal_moves(self):
         all_moves = []
         for coord in self.get_all_pos(self.current_player):
+            # print(coord)
             move_set = self.a_star_new(coord)
             if move_set:
                 all_moves.append(
@@ -593,7 +578,6 @@ class BitBoard:
                 # print(coord)
                 # for move, res in move_set:
                 #     print(move, res)
-
         all_moves.append((GrowAction(), None))
 
         return all_moves

@@ -9,6 +9,7 @@ from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
 import time
+import json
 
 
 """
@@ -18,11 +19,13 @@ Chooses the move that gives the best possible guaranteed perforamnce.
 
 """
 
-CUTOFF_DEPTH = 5
+CUTOFF_DEPTH = 4
+SHORTENING_FACTOR = 1
+ASTAR = False
 
 class MinimaxSearchNode(Strategy):
     def __init__(self, state:BitBoard, parent = None, parent_action = None,
-                 time_budget = 178.0):
+                 time_budget = 178.0, weights = None):
         self.state = state
         self.parent = parent
         self.parent_action = parent_action
@@ -33,7 +36,11 @@ class MinimaxSearchNode(Strategy):
             self.root_player = state.get_current_player()
             self.time_budget = parent.time_budget
         self.children = []
-
+        self.astar = False
+        
+        default = {'W_DIST':0.4, 'W_MOB':0.3, 'W_BORDER':0.2, 'W_CENTRAL':0.1}
+        with open("weights.json", "r") as wf:
+            self.weights = json.load(wf)
 
     def cutoff_test(self, state:BitBoard, depth, cutoff_depth = CUTOFF_DEPTH):
         if state.is_game_over():
@@ -60,8 +67,76 @@ class MinimaxSearchNode(Strategy):
             else:
                 return 0  # draw
             return 1 if winner_piece == self.root_player else -1
-        return self.simple_eval(state)
-    
+        return self.adaptive_eval(state)
+
+    def adaptive_eval(self, state: BitBoard):
+        w = self.weights
+        me = self.root_player
+        you = BitBoard.FROG if me == BitBoard.OPPONENT else BitBoard.OPPONENT
+        board = state.get_board()
+
+        # 1) goal distance
+        dist_me = dist_you = 0
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if board[r][c] == me:
+                    dist_me  += (BOARD_N - 1 - r)
+                elif board[r][c] == you:
+                    dist_you += r
+
+        # 2) mobility
+
+        moves_me  = len(state.get_all_moves())
+        state.toggle_player()
+        moves_you = len(state.get_all_moves())
+        state.toggle_player()
+
+        # 3) border control
+        border_me  = state.frog_border_count[me]
+        border_you = state.frog_border_count[you]
+
+        # 4) centralization
+        mid = (BOARD_N - 1) / 2
+        cent_me = cent_you = 0.0
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                if board[r][c] == me:
+                    cent_me  += mid - abs(c - mid)
+                elif board[r][c] == you:
+                    cent_you += mid - abs(c - mid)
+
+        # normalize and combine
+        norm_dist = (dist_you - dist_me) / (BOARD_N * BOARD_N)
+        norm_mob  = (moves_me - moves_you) / (moves_me + moves_you + 1)
+        norm_border = (border_me - border_you) / BOARD_N
+        norm_cent  = (cent_me - cent_you) / (BOARD_N * BOARD_N)
+
+        score = (
+            w['W_DIST']   * norm_dist
+          + w['W_MOB']    * norm_mob
+          + w['W_BORDER'] * norm_border
+          + w['W_CENTRAL']* norm_cent
+        )
+        return score
+
+
+    def astar_eval(self, state):
+        current_player = self.root_player
+        # If frog, we are moving towards the bottom
+        board = state.board
+        astar_check = 0
+        if current_player == BitBoard.FROG:
+            for r in range(BOARD_N): 
+                for c in range(BOARD_N):
+                    if board[r][c] == BitBoard.FROG:
+                        astar_check += (r+1)
+        if current_player == BitBoard.OPPONENT:
+            for r in range(BOARD_N):
+                for c in range(BOARD_N):
+                    if board[r][c] == BitBoard.OPPONENT:
+                        astar_check += (8- (r+1))
+        return astar_check
+
     
     def simple_eval(self, state):
         current_player = self.root_player
@@ -88,7 +163,14 @@ class MinimaxSearchNode(Strategy):
         if self.cutoff_test(state, depth):
             return self.eval_function(state)
         value = float("-inf")
-        for action in state.get_all_moves():
+        if self.astar == True:
+            moves = state.get_all_optimal_moves()
+            newmoves = state.get_all_moves()
+            moves.extend(random.sample(newmoves, len(newmoves)//SHORTENING_FACTOR))
+        else:
+            moves = state.get_all_moves()
+
+        for action in moves:
             new_position = state.move(action[0], action[1])
             new_position.toggle_player()
             value = max(value, self.min_value(new_position, alpha, beta, depth +1))
@@ -101,7 +183,13 @@ class MinimaxSearchNode(Strategy):
         if self.cutoff_test(state, depth):
             return self.eval_function(state)
         value = float("inf")
-        for action in state.get_all_moves():
+        if self.astar == True:
+            moves = state.get_all_optimal_moves()
+            newmoves = state.get_all_moves()
+            moves.extend(random.sample(newmoves, len(newmoves)//SHORTENING_FACTOR))
+        else:
+            moves = state.get_all_moves()
+        for action in moves:
             new_position = state.move(action[0], action[1])
             new_position.toggle_player()
             value = min(value, self.max_value(new_position, alpha, beta, depth +1))
@@ -113,6 +201,13 @@ class MinimaxSearchNode(Strategy):
 
     def best_action(self, safety_margin: float = 5, bt: float = 0.75):
         # 1) grab the referee‐supplied clock once
+        using_astar = self.state.get_all_optimal_moves()
+        if len(using_astar)>=2 and ASTAR:
+            self.astar = True
+        else:
+            self.astar = False
+
+
         total_time = self.time_budget
         assert total_time > safety_margin, "No time to move!"
 
@@ -135,6 +230,7 @@ class MinimaxSearchNode(Strategy):
         beta = float("inf") # Opponent's optimal score (-inf from their perspective)
         current_state = self.state
         best_action = None
+
         for action in current_state.get_all_moves():
             new_position = current_state.move(action[0], action[1])
             new_position.toggle_player()

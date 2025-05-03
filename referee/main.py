@@ -169,7 +169,16 @@ def main(options: Namespace | None = None):
             rl.critical("result: draw")
         else:
             rl.critical(f"result: {agents[game_result]['name']}")
+            try:
+                with open("results.txt", "r") as f:
+                    red_wins = int(f.read().strip())
+            except (FileNotFoundError, ValueError):
+                red_wins = 0
 
+            if game_result.color == PlayerColor.RED:
+                red_wins+=1
+            with open("results.txt", "w") as f:
+                f.write(f"{red_wins}")
         exit(0)
 
     except InvalidAckError:
