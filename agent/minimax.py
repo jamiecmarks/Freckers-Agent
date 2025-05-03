@@ -22,7 +22,7 @@ START_DEPTH = 1
 SHORTENING_FACTOR = 1
 ASTAR = False
 LARGE_VALUE = 999
-SPEEDUP_FACTOR = 5
+SPEEDUP_FACTOR = 1
 EVAL = "adaptive"
 
 class MinimaxSearchNode(Strategy):
