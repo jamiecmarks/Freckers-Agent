@@ -93,7 +93,7 @@ def main(n_games=500):
 
             # **No --weights flag here!**
             subprocess.run(
-                [sys.executable, "-m", "referee", "agent", "randomagent"],
+                [sys.executable, "-m", "referee", "agent", "agent2"],
             )
             
             with open("results.txt", "r") as f:

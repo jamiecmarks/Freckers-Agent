@@ -1,8 +1,6 @@
 import random
 import numpy as np
 from collections import defaultdict
-
-from agent.minimax import SPEEDUP_FACTOR
 from .bitboard import BitBoard
 from referee.game.actions import GrowAction, MoveAction
 from referee.game.constants import BOARD_N
@@ -382,7 +380,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
         # 3) ideal slice, then clamp below
         raw_alloc = (total_time - safety_margin) / (moves_left**beta)
-        alloc_time = min(raw_alloc, total_time - safety_margin)/SPEEDUP_FACTOR
+        alloc_time = min(raw_alloc, total_time - safety_margin)
 
         assert alloc_time >= 0
 
@@ -391,14 +389,6 @@ class MonteCarloTreeSearchNode(Strategy):
         hard_deadline = t0 + alloc_time
 
         sims = 0
-
-        if self.state.get_ply_count() < 6:
-            moves = self.state.get_all_moves()
-            move_choice =  random.choice(moves)
-            print("Random move for early game")
-            return {"action": move_choice[0]}
-
-
         # 5) loop until *either* we hit the per‐move slice *or* the referee clock
         while True:
             now = time.perf_counter()

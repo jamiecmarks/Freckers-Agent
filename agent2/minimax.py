@@ -22,7 +22,7 @@ START_DEPTH = 1
 SHORTENING_FACTOR = 1
 ASTAR = False
 LARGE_VALUE = 999
-SPEEDUP_FACTOR = 2
+SPEEDUP_FACTOR = 5
 EVAL = "adaptive"
 
 class MinimaxSearchNode(Strategy):
@@ -42,7 +42,7 @@ class MinimaxSearchNode(Strategy):
         self.cutoff_depth = 4
         
         default = {'W_DIST':0.4, 'W_MOB':0.3, 'W_BORDER':0.2, 'W_CENTRAL':0.1}
-        with open("weights.json", "r") as wf:
+        with open("weights2.json", "r") as wf:
             self.weights = json.load(wf)
 
 
@@ -238,12 +238,12 @@ class MinimaxSearchNode(Strategy):
         all_moves = self.state.get_all_moves()
         current_state = self.state
         cutoff_depth = START_DEPTH
-
         if self.state.get_ply_count() < 6:
             moves = self.state.get_all_moves()
             move_choice =  random.choice(moves)
             print("Random move for early game")
             return {"action": move_choice[0]}
+
         while True:
             if time.perf_counter() >= hard_deadline:
                 print(time.perf_counter())
