@@ -1,136 +1,142 @@
-import json
-import random
+import torch
+import torch.nn as nn
+import torch.optim as optim
 import subprocess
 import sys
-from tqdm import tqdm
-from copy import deepcopy
 from pathlib import Path
+import random
+import json
 
-# --- Hill-climbing tuner as before ---
-class HeuristicTuner:
-    def __init__(self, initial_weights, perturbation=0.02, min_perturbation=0.005, decay=0.995):
-        self.weights = initial_weights.copy()
-        self.base_perturbation = perturbation
-        self.perturbation = perturbation
-        self.min_perturbation = min_perturbation
-        self.decay = decay
-        self.last_perturb = None
-        self.performance_buffer = []
-        self.buffer_size = 3
-        self.direction_memory = {}
-        self.step_count = 0
+# --- Simple MLP to predict 4 heuristic weights ---
+class WeightNet(nn.Module):
+    def __init__(self, seed=None):
+        super().__init__()
+        if seed:
+            torch.manual_seed(seed)
+        self.model = nn.Sequential(
+            nn.Linear(1, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, 4),  # Raw output (no activation)
+            nn.Sigmoid()  # Sigmoid activation to constrain outputs to [0, 1]
+        )
 
-        self.best_weights = deepcopy(self.weights)
-        self.best_avg_score = 0
-        self.recent_scores = []
+    def forward(self, x):
+        return self.model(x)
 
-    def propose_change(self):
-        if self.last_perturb is not None and len(self.performance_buffer) < self.buffer_size:
-            return
-
-        if self.last_perturb and len(self.performance_buffer) == self.buffer_size:
-            avg_result = sum(self.performance_buffer) / self.buffer_size
-            w, delta = self.last_perturb
-            if avg_result <= 0:
-                self.weights[w] -= delta
-            else:
-                self.direction_memory[w] = delta
-
-        self.performance_buffer = []
-
-        # Backup & revert if recent performance is much worse
-        if len(self.recent_scores) >= 10:
-            recent_avg = sum(self.recent_scores[-10:]) / 10
-            if recent_avg < self.best_avg_score - 0.2:
-                self.weights = deepcopy(self.best_weights)
-                self.direction_memory.clear()
-                self.perturbation = self.base_perturbation
-                print("[REVERT] Performance dropped too far, reverting to best weights")
-
-        w = random.choice(list(self.weights.keys()))
-        prev_delta = self.direction_memory.get(w, 0)
-        bias = 0.5 * prev_delta
-        delta = ((random.random() * 2 - 1) * self.perturbation) + bias
-        self.last_perturb = (w, delta)
-        self.weights[w] += delta
-
-        self.step_count += 1
-        self.perturbation = max(self.min_perturbation, self.base_perturbation * (self.decay ** self.step_count))
-
-    def evaluate_outcome(self, won: bool):
-        score = 1 if won else 0
-        self.performance_buffer.append(score)
-        self.recent_scores.append(score)
-        if len(self.recent_scores) > 100:
-            self.recent_scores.pop(0)
-
-        recent_avg = sum(self.recent_scores[-10:]) / 10
-        if recent_avg > self.best_avg_score:
-            self.best_avg_score = recent_avg
-            self.best_weights = deepcopy(self.weights)
-
-    def get_weights(self):
-        return deepcopy(self.weights)
-
-
-
-def dump_weights(weights, path="weights.json"):
+# --- Convert weights to a JSON file ---
+def write_weights(path, weights):
+    weights_dict = {
+        "centrality": float(weights[0]),
+        "double_jumps": float(weights[1]),
+        "distance": float(weights[2]),
+        "mobility": float(weights[3])
+    }
     with open(path, "w") as f:
-        json.dump(weights, f)
+        json.dump(weights_dict, f)
 
-def main(n_games=500):
-    with open("weights.json", "r") as f:
-        initial = json.load(f)
-    tuner = HeuristicTuner(initial, perturbation=0.02)
-    Path("results.txt").write_text("0")
+# --- Training loop ---
+def train(n_games=1000):
+    # Setup models & optimizers
+    random.seed()  # Set a random seed for model initialization
+    model_red = WeightNet(seed=random.randint(0, 10000))  # Random seed
+    model_blue = WeightNet(seed=random.randint(0, 10000))  # Random seed
+    optimizer_red = optim.Adam(model_red.parameters(), lr=0.002)
+    optimizer_blue = optim.Adam(model_blue.parameters(), lr=0.002)
 
-    prev_wins = 0
-    last_10 = []
-    with tqdm(total=n_games, desc="Running Games", ncols=n_games) as pbar:
-        for i in range(1, n_games+1):
-            tuner.propose_change()
-            dump_weights(tuner.get_weights(), "weights.json")
+    loss_fn = nn.MSELoss()
+    history = []
 
-            # **No --weights flag here!**
-            subprocess.run(
-                [sys.executable, "-m", "referee", "agent", "agent2"],
-            )
-            
-            with open("results.txt", "r") as f:
-                try:
-                    current_wins = int(f.read().strip())
-                except ValueError:
-                    current_wins = 0
-            # 3) read the updated total from results.txt
-            new_wins = int(Path("results.txt").read_text().strip() or "0")
+    # Create a log file for progress updates
+    with open("game_output.log", "a") as log_file:
+        for i in range(1, n_games + 1):
+            model_red.eval()
+            model_blue.eval()
 
-            # 4) did we win this match?
-            if len(last_10) < 10:
-                last_10.append(new_wins - prev_wins) 
+            # Add slight noise to encourage exploration
+            input_tensor = torch.tensor([[random.uniform(-1.0, 1.0)]], dtype=torch.float32)
+
+            # Predict initial weights
+            weights_red = model_red(input_tensor).detach().numpy().flatten()
+            weights_blue = model_blue(input_tensor).detach().numpy().flatten()
+
+            # Log initial weights
+            log_file.write(f"Initial Weights (Red): {weights_red}\n")
+            log_file.write(f"Initial Weights (Blue): {weights_blue}\n")
+
+            # Run a game
+            subprocess.run([sys.executable, "-m", "referee", "agent", "agent2"])
+
+            # Read game outcome (positive = red wins, negative = blue wins)
+            try:
+                score = float(Path("eval.txt").read_text().strip())
+            except:
+                score = 0.0
+
+            # Read advantage vectors
+            try:
+                adv_red = list(map(float, Path("red_advantage.txt").read_text().strip().split()))
+                adv_blue = list(map(float, Path("blue_advantage.txt").read_text().strip().split()))
+            except:
+                adv_red = [0.0] * 4  # Default to zeros if the advantage file isn't available
+                adv_blue = [0.0] * 4  # Default to zeros if the advantage file isn't available
+
+            # Log advantages
+            log_file.write(f"Red Advantage: {adv_red}\n")
+            log_file.write(f"Blue Advantage: {adv_blue}\n")
+
+            # Train both models based on the outcome
+            model_red.train()
+            model_blue.train()
+
+            # Adjust weights based on advantage vectors
+            if score > 0:  # Red wins
+                # Reinforce red's heuristics, punish blue's
+                target_red = torch.tensor(adv_red, dtype=torch.float32) + abs(score)
+                target_blue = torch.tensor(adv_blue, dtype=torch.float32) - abs(score)
+            elif score < 0:  # Blue wins
+                # Reinforce blue's heuristics, punish red's
+                target_red = torch.tensor(adv_red, dtype=torch.float32) - abs(score)
+                target_blue = torch.tensor(adv_blue, dtype=torch.float32) + abs(score)
             else:
-                last_10.pop(0)
-                last_10.append(new_wins - prev_wins)
-            if i%10 == 0:
-                print("Average last 10: ", sum(last_10)*10, "% winrate")
-            won = (new_wins > prev_wins)
-            if won:
-                print(f"Game {i} won")
-            else:
-                print(f"Game {i} lost")
+                target_red = torch.tensor(adv_red, dtype=torch.float32)
+                target_blue = torch.tensor(adv_blue, dtype=torch.float32)
 
-            # 5) feed result into tuner
-            tuner.evaluate_outcome(won)
+            # Loss and update
+            loss_red = loss_fn(model_red(input_tensor), target_red)
+            loss_blue = loss_fn(model_blue(input_tensor), target_blue)
 
-            # 6) advance baseline and update progress
-            prev_wins = new_wins
-            pbar.set_postfix(wins=f"{current_wins}/{i}")
-            pbar.update(1)
+            optimizer_red.zero_grad()
+            loss_red.backward()
+            optimizer_red.step()
 
-    wins = int(Path("results.txt").read_text().strip() or "0")
-    print(f"\nFinal Success Rate: {wins / n_games:.2f}%")
+            optimizer_blue.zero_grad()
+            loss_blue.backward()
+            optimizer_blue.step()
 
+            # Log updated weights
+            log_file.write(f"Updated Red Weights: {model_red.model[4].weight.data}\n")
+            log_file.write(f"Updated Blue Weights: {model_blue.model[4].weight.data}\n")
+            # Predict initial weights
+            weights_red = model_red(input_tensor).detach().numpy().flatten()
+            weights_blue = model_blue(input_tensor).detach().numpy().flatten()
+
+            # --- 🔧 WRITE THEM TO FILE ---
+            write_weights("weights.json", weights_red)
+            write_weights("weights2.json", weights_blue)   
+
+            # Logging every 10 games
+            if i % 10 == 0:
+                avg_score = sum(history[-10:]) / 10 if history else 0
+                log_file.write(f"Game {i}: Last 10 avg score = {avg_score:.3f}\n")
+
+        # Save models
+        torch.save(model_red.state_dict(), "model_red.pth")
+        torch.save(model_blue.state_dict(), "model_blue.pth")
+        print("Training complete.")
+
+# Entry point
 if __name__ == "__main__":
-    n = int(sys.argv[1]) if len(sys.argv)>1 else 100
-    main(n)
-
-# --- Helper to write the current weight vector to disk ---
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+    train(n)

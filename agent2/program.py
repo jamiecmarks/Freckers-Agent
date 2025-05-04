@@ -26,6 +26,9 @@ class Agent:
         """
         self._color = color
         print("I am a minimax agent")
+        with open("blue_pv_features.csv", "w") as pf:
+            print("Writing new file")
+            pf.write("move,centrality,double,distance,mobility\n")
 
         self.total_moves = 0
         bitboard = BitBoard()

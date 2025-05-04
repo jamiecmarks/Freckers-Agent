@@ -52,7 +52,7 @@ class BitBoard:
         for c in range(BOARD_N):
             if self.board[BOARD_N - 1][c] == self.FROG:
                 self.frog_border_count[self.FROG] += 1
-            elif self.board[0][c] == self.OPPONENT:
+            if self.board[0][c] == self.OPPONENT:
                 self.frog_border_count[self.OPPONENT] += 1
         return (
             self.frog_border_count[self.FROG] == BOARD_N - 2

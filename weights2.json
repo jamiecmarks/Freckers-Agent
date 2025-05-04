@@ -1,1 +1,1 @@
-{"W_DIST": 0.8, "W_MOB": 0.1, "W_BORDER": 0.1, "W_CENTRAL": 0.1}
+{"centrality": 0.25, "double_jumps": 0.25, "distance": 0.25, "mobility": 0.25}
