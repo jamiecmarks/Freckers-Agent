@@ -9,7 +9,7 @@ from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
 import time
-import pandas as pd
+# import pandas as pd
 import json
 
 
