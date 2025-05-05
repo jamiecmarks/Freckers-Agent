@@ -10,7 +10,7 @@ from referee.game.coord import Coord
 from .strategy import Strategy
 import time
 # import pandas as pd
-import json
+# import json
 
 
 """
@@ -43,9 +43,12 @@ class MinimaxSearchNode(Strategy):
         self.astar = False
         self.cutoff_depth = 4
         self._logging_pv = False
-        
-        with open("weightsagent.json", "r") as wf:
-            self.weights = json.load(wf)
+
+        self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
+                         "distance": 0.9127612113952637, "mobility": 0.03814251720905304}
+
+        #with open("weightsagent.json", "r") as wf:
+        #    self.weights = json.load(wf)
 
 
 
