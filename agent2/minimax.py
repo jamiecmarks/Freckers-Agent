@@ -23,9 +23,9 @@ START_DEPTH = 1
 SHORTENING_FACTOR = 1
 ASTAR = False
 LARGE_VALUE = 999
-SPEEDUP_FACTOR = 4
+SPEEDUP_FACTOR = 1
 EVAL = "adaptive"
-RANDOM_START = 4
+RANDOM_START = 0
 
 class MinimaxSearchNode(Strategy):
     def __init__(self, state:BitBoard, parent = None, parent_action = None,

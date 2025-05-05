@@ -6,7 +6,7 @@ from tqdm import tqdm
 python_path = sys.executable
 
 # Step 2: Define the number of games to run
-n = 100  # Change this as needed
+n = 10  # Change this as needed
 
 # Step 3: Reset results.txt to "0"
 with open("results.txt", "w") as f:
