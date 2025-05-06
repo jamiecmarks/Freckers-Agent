@@ -1,3 +1,5 @@
+SUBMITTING = False
+
 
 from enum import nonmember
 import random
@@ -10,7 +12,15 @@ from referee.game.coord import Coord
 from .strategy import Strategy
 import time
 # import pandas as pd
-# import json
+if not SUBMITTING:
+    import json
+
+# Need to punish: leaving one of our frogs behind. Generally the cause of losses. 
+# Priorities at different states of the game:
+#   - Early game: Expand forwards as quickly as possible. This is generally done
+    # via double jumps. 
+    # Midgame - distance. we wnat moves which make us advance more than the other team
+    # Endgame - More of a stress on average mobility (mobility of pieces not already finished)
 
 
 """
@@ -23,9 +33,9 @@ START_DEPTH = 1
 SHORTENING_FACTOR = 1
 ASTAR = False
 LARGE_VALUE = 999
-SPEEDUP_FACTOR = 1
+SPEEDUP_FACTOR = 50
 EVAL = "adaptive"
-RANDOM_START =0
+RANDOM_START =4
 
 class MinimaxSearchNode(Strategy):
     def __init__(self, state:BitBoard, parent = None, parent_action = None,
@@ -44,11 +54,22 @@ class MinimaxSearchNode(Strategy):
         self.cutoff_depth = 4
         self._logging_pv = False
 
-        self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
-                         "distance": 0.9127612113952637, "mobility": 0.03814251720905304}
-
-        #with open("weightsagent.json", "r") as wf:
-        #    self.weights = json.load(wf)
+        if SUBMITTING:
+            # Earlygame
+            if self.state.get_ply_count() <20:
+                self.weights = {"centrality": 0.3, "double_jumps": 0.8,
+                           "distance": 10.5, "mobility": 0.1}
+            # Midgame
+            elif self.state.get_ply_count() <40:
+                self.weights = {"centrality": 0.4, "double_jumps": 0.4,
+                           "distance": 10.8, "mobility": 0.3}
+            # Endgame
+            else:   
+                self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
+                           "distance": 10.9127612113952637, "mobility": 0.03814251720905304}
+        else:
+            with open("weights.json", "r") as wf:
+                self.weights = json.load(wf)
 
 
 
@@ -58,11 +79,11 @@ class MinimaxSearchNode(Strategy):
             # All the neural network stuff
             eval = 10 * self.simple_eval(board)
 
-            F = np.loadtxt("red_pv_features.csv", delimiter=",", skiprows=1)
-            deltas = F[-1] - F[0]
-            norm = np.abs(deltas).sum() + 1e-8
-            adv = (deltas / norm) * eval
-            np.savetxt("red_advantage.txt", adv, fmt="%.6f")
+            # F = np.loadtxt("red_pv_features.csv", delimiter=",", skiprows=1)
+            # deltas = F[-1] - F[0]
+            # norm = np.abs(deltas).sum() + 1e-8
+            # adv = (deltas / norm) * eval
+            # np.savetxt("red_advantage.txt", adv, fmt="%.6f")
 
             with open("eval.txt", "w") as fp:
                 fp.write(f"{eval}")
@@ -74,12 +95,12 @@ class MinimaxSearchNode(Strategy):
                 eval = 10 * self.simple_eval(new_state)
 
                 # All the neural network stuff
-                F = np.loadtxt("red_pv_features.csv", delimiter=",", skiprows=1)
-                deltas = F[-1] - F[0]
-                norm = np.abs(deltas).sum() + 1e-8
-                adv = 100 * (deltas / norm) * eval
-                print("Red advantage time!")
-                np.savetxt("red_advantage.txt", adv[1:], fmt="%.6f")
+                # F = np.loadtxt("red_pv_features.csv", delimiter=",", skiprows=1)
+                # deltas = F[-1] - F[0]
+                # norm = np.abs(deltas).sum() + 1e-8
+                # adv = 100 * (deltas / norm) * eval
+                # print("Red advantage time!")
+                # np.savetxt("red_advantage.txt", adv[1:], fmt="%.6f")
 
                 with open("eval.txt", "w") as fp:
                     fp.write(f"{eval}")

@@ -1,154 +1,223 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import json
 import subprocess
 import sys
 from pathlib import Path
-from tqdm import tqdm
 import random
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from datetime import datetime
 
-# --- Simple MLP to predict 4 heuristic weights ---
 class WeightNet(nn.Module):
     def __init__(self, seed=None):
         super().__init__()
-        if seed:
+        if seed is not None:
             torch.manual_seed(seed)
-        self.model = nn.Sequential(
-            nn.Linear(1, 32),
-            nn.ReLU(),
-            nn.Linear(32, 32),
-            nn.ReLU(),
-            nn.Linear(32, 4),  # Raw output (no activation)
-            nn.Sigmoid()  # Sigmoid activation to constrain outputs to [0, 1]
-        )
+        # raw parameters; sigmoid will map to [0,1]
+        self.params = nn.Parameter(torch.randn(4))
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self):
+        return torch.sigmoid(self.params)
 
-# --- Convert weights to a JSON file ---
+class AdvantageTracker:
+    def __init__(self, n):
+        self.sum = np.zeros(n)
+        self.sum_sq = np.zeros(n)
+        self.delta_sum = np.zeros(n)
+        self.delta_sum_sq = np.zeros(n)
+        self.count = 0
+
+    def update(self, adv, delta):
+        adv = np.clip(adv, -10, 10)
+        delta = np.clip(delta, -10, 10)
+        self.sum += adv
+        self.sum_sq += adv**2
+        self.delta_sum += delta
+        self.delta_sum_sq += delta**2
+        self.count += 1
+
+    def mean(self):
+        return self.sum / (self.count + 1e-8)
+
+    def std(self):
+        m = self.mean()
+        return np.sqrt(self.sum_sq/(self.count+1e-8) - m**2 + 1e-8)
+
+    def delta_mean(self):
+        return self.delta_sum/(self.count+1e-8)
+
+    def delta_std(self):
+        m = self.delta_mean()
+        return np.sqrt(self.delta_sum_sq/(self.count+1e-8) - m**2 + 1e-8)
+
+
 def write_weights(path, weights):
-    weights_dict = {
-        "centrality": float(weights[0]),
-        "double_jumps": float(weights[1]),
-        "distance": float(weights[2]),
-        "mobility": float(weights[3])
-    }
-    with open(path, "w") as f:
-        json.dump(weights_dict, f)
+    d = {"centrality": float(weights[0]),
+         "double_jumps": float(weights[1]),
+         "distance": float(weights[2]),
+         "mobility": float(weights[3])}
+    with open(path, 'w') as f:
+        json.dump(d, f)
 
-# --- Training loop ---
-def train(n_games=1000, batch_size=5):
-    # Setup models & optimizers
-    random.seed()  # Set a random seed for model initialization
-    model_red = WeightNet(seed=random.randint(0, 10000))  # Random seed
-    model_blue = WeightNet(seed=random.randint(0, 10000))  # Random seed
-    optimizer_red = optim.Adam(model_red.parameters(), lr=0.01)
-    optimizer_blue = optim.Adam(model_blue.parameters(), lr=0.01)
+def plot_metrics(history):
+    games = [h['game'] for h in history]
+    labels = ['centrality', 'double_jumps', 'distance', 'mobility']
 
-    loss_fn = nn.MSELoss()
+    # ---------- Weights Evolution ----------
+    plt.figure(figsize=(10,6))
+    # collect both red and blue weight arrays
+    w_red  = np.array([h['weights_red']  for h in history])
+    w_blue = np.array([h['weights_blue'] for h in history])
+    # plot each feature for both agents
+    for i, lab in enumerate(labels):
+        plt.plot(games, w_red[:, i],  label=f'red_{lab}')
+        plt.plot(games, w_blue[:, i], '--', label=f'blue_{lab}')
+    plt.title('Weights Evolution')
+    plt.xlabel('Game')
+    plt.ylabel('Weight')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('weights.png')
+    plt.close()
+
+    # ---------- Training Loss ----------
+    plt.figure(figsize=(10,6))
+    plt.plot(games, [h['loss_red']  for h in history], label='Red Loss')
+    plt.plot(games, [h['loss_blue'] for h in history], label='Blue Loss')
+    plt.title('Training Loss')
+    plt.xlabel('Game')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('losses.png')
+    plt.close()
+
+    # ---------- Win Rate vs Baseline ----------
+    if any('win_rate' in h for h in history):
+        bs = [h['game']     for h in history if 'win_rate' in h]
+        wr = [h['win_rate'] for h in history if 'win_rate' in h]
+        plt.figure(figsize=(10,6))
+        plt.plot(bs, wr, label='Win Rate vs Baseline')
+        plt.title('Win Rate Against Baseline')
+        plt.xlabel('Game')
+        plt.ylabel('Win Rate')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig('win_rates.png')
+        plt.close()
+
+
+
+def evaluate_baseline(model, n_games=10):
+    baseline = np.array([0.25]*4)
+    w = model().detach().numpy()
+    wins=losses=draws=0
+    for _ in range(n_games):
+        write_weights('weights.json', w)
+        write_weights('weights2.json', baseline)
+        subprocess.run([sys.executable, '-m', 'referee','agent','agent2'], stdout=subprocess.DEVNULL)
+        try:
+            score = float(Path('eval.txt').read_text().strip())
+            if score>0: wins+=1
+            elif score<0: losses+=1
+            else: draws+=1
+        except: draws+=1
+    return wins/n_games, losses/n_games, draws/n_games
+
+
+def train(n_games=1000):
+    model_red  = WeightNet(seed=random.randint(0,10000))
+    model_blue = WeightNet(seed=random.randint(0,10000))
+    opt_red  = optim.Adam(model_red.parameters(),  lr=0.01)
+    opt_blue = optim.Adam(model_blue.parameters(), lr=0.01)
+    sched_red  = optim.lr_scheduler.StepLR(opt_red,  step_size=200, gamma=0.5)
+    sched_blue = optim.lr_scheduler.StepLR(opt_blue, step_size=200, gamma=0.5)
+
+    tracker_red  = AdvantageTracker(4)
+    tracker_blue = AdvantageTracker(4)
     history = []
+    wins=losses=draws=0
+    score_sma = 0.0
 
-    # Create a log file for progress updates
-    with open("game_output.log", "a") as log_file:
-        for i in tqdm(range(1, n_games + 1), desc="Training"):
-            model_red.eval()
-            model_blue.eval()
+    for i in range(1, n_games+1):
+        # generate noisy weights for exploration
+        w_red  = model_red().detach().numpy()
+        w_blue = model_blue().detach().numpy()
+        noise = 0.05*(1 - i/n_games)
+        if noise>0:
+            w_red  = np.clip(w_red  + np.random.randn(4)*noise,  0,1)
+            w_blue = np.clip(w_blue + np.random.randn(4)*noise,  0,1)
 
-            # Add slight noise to encourage exploration
-            input_tensor = torch.tensor([[random.uniform(-1.0, 1.0)]], dtype=torch.float32)
+        write_weights('weights.json',  w_red)
+        write_weights('weights2.json', w_blue)
+        subprocess.run([sys.executable,'-m','referee','agent','agent2'], stdout=subprocess.DEVNULL)
+        try:
+            score = float(Path('eval.txt').read_text().strip())
+        except:
+            score = 0.0
+        score_sma = 0.9*score_sma + 0.1*score
+        if score>0: wins+=1
+        elif score<0: losses+=1
+        else: draws+=1
 
-            # Create empty lists to store batch results
-            batch_scores = []
-            batch_weights_red = []
-            batch_weights_blue = []
+        # compute feature deltas
+        F_red  = np.loadtxt('red_pv_features.csv',  delimiter=',', skiprows=1)
+        delta_red = np.sum(np.abs(np.diff(F_red,axis=0)),axis=0)[1:]
+        z_red = ((delta_red - tracker_red.delta_mean()) / (tracker_red.delta_std()+1e-8)
+                 if tracker_red.count>0 else delta_red/ (np.sum(np.abs(delta_red))+1e-8))
+        adv_red = z_red * score_sma
+        tracker_red.update(adv_red, delta_red)
 
-            # Run batch of games
-            for _ in range(batch_size):
-                # 1. Predict weights
-                weights_red = model_red(input_tensor).detach().numpy().flatten()
-                weights_blue = model_blue(input_tensor).detach().numpy().flatten()
+        F_blue = np.loadtxt('blue_pv_features.csv', delimiter=',', skiprows=1)
+        delta_blue = np.sum(np.abs(np.diff(F_blue,axis=0)),axis=0)[1:]
+        z_blue = ((delta_blue - tracker_blue.delta_mean()) / (tracker_blue.delta_std()+1e-8)
+                  if tracker_blue.count>0 else delta_blue/(np.sum(np.abs(delta_blue))+1e-8))
+        adv_blue = z_blue * (score_sma) # Modified to fix inverse issue?
+        tracker_blue.update(adv_blue, delta_blue)
 
-                # Debugging: Print raw weights before writing them
-                log_file.write(f"Raw Weights (Red): {weights_red}\n")
-                log_file.write(f"Raw Weights (Blue): {weights_blue}\n")
+        # --- UPDATED LOSS BLOCK ---
+        adv_t_red  = torch.tensor(adv_red,  dtype=torch.float32)
+        adv_t_blue = torch.tensor(adv_blue, dtype=torch.float32)
+        w_r = model_red()
+        w_b = model_blue()
+        loss_red  = - torch.dot(w_r, adv_t_red)
+        loss_blue = - torch.dot(w_b, adv_t_blue)
 
-                # 2. Save weights to file
-                write_weights("weights.json", weights_red)
-                write_weights("weights2.json", weights_blue)
+        opt_red.zero_grad()
+        loss_red.backward()
+        torch.nn.utils.clip_grad_norm_(model_red.parameters(), max_norm=0.5)
+        opt_red.step()
+        sched_red.step()
 
-                # 3. Run a game (subprocess doesn't log to game_output.log now)
-                subprocess.run([sys.executable, "-m", "referee", "agent", "agent2"])
+        opt_blue.zero_grad()
+        loss_blue.backward()
+        torch.nn.utils.clip_grad_norm_(model_blue.parameters(), max_norm=0.5)
+        opt_blue.step()
+        sched_blue.step()
+        # --- END LOSS BLOCK ---
 
-                # 4. Get score (positive = red wins)
-                try:
-                    score = float(Path("eval.txt").read_text().strip())
-                except:
-                    score = 0.0
+        history.append({
+            'game':i,
+            'loss_red': loss_red.item(),
+            'loss_blue': loss_blue.item(),
+            'win_rate': wins/(wins+losses+draws+1e-8) if i%50==0 else None,
+            'weights_red': w_red.tolist(),
+            'weights_blue': w_blue.tolist()
+        })
 
-                batch_scores.append(score)
-                batch_weights_red.append(weights_red)
-                batch_weights_blue.append(weights_blue)
+        if i%10==0:
+            plot_metrics(history)
+            pd.DataFrame(history).to_csv('training_metrics.csv', index=False)
 
-            # Calculate average score for this batch
-            avg_score = sum(batch_scores) / batch_size
-            history.append(avg_score)
+    torch.save(model_red.state_dict(),'model_red.pth')
+    torch.save(model_blue.state_dict(),'model_blue.pth')
+    plot_metrics(history)
+    pd.DataFrame(history).to_csv('training_metrics.csv', index=False)
+    print("Training complete.")
 
-            # 5. Train both models
-            model_red.train()
-            model_blue.train()
-
-            # Process batch results
-            for j in range(batch_size):
-                weights_red = torch.tensor(batch_weights_red[j], dtype=torch.float32)
-                weights_blue = torch.tensor(batch_weights_blue[j], dtype=torch.float32)
-
-                pred_red = model_red(input_tensor)
-                pred_blue = model_blue(input_tensor)
-
-                # Create detached versions to use as fixed targets
-                target_red = pred_red.detach().clone()
-                target_blue = pred_blue.detach().clone()
-
-                # Only reward the winner / punish the loser
-                score = batch_scores[j]
-                if score > 0:  # Red won
-                    target_red += torch.tensor([[abs(score)]])
-                    target_blue -= torch.tensor([[abs(score)]])
-                elif score < 0:  # Blue won
-                    target_red -= torch.tensor([[abs(score)]])
-                    target_blue += torch.tensor([[abs(score)]])
-
-                # Loss and update
-                loss_red = loss_fn(pred_red, target_red)
-                loss_blue = loss_fn(pred_blue, target_blue)
-
-                optimizer_red.zero_grad()
-                loss_red.backward()
-                optimizer_red.step()
-
-                optimizer_blue.zero_grad()
-                loss_blue.backward()
-                optimizer_blue.step()
-
-            # Debugging: Print weights after update
-            log_file.write(f"Updated Red Weights: {model_red.model[4].weight.data}\n")
-            log_file.write(f"Updated Blue Weights: {model_blue.model[4].weight.data}\n")
-
-            # Logging
-            if i % 10 == 0:
-                avg = sum(history[-10:]) / 10
-                log_file.write(f"Game {i}: Last 10 avg score = {avg:.3f}\n")
-            if i % 100 == 0:
-                log_file.write(f"Red weights: {batch_weights_red[-1]}\n")
-                log_file.write(f"Blue weights: {batch_weights_blue[-1]}\n")
-
-        # Save models
-        torch.save(model_red.state_dict(), "model_red.pth")
-        torch.save(model_blue.state_dict(), "model_blue.pth")
-        print("Training complete.")
-
-# Entry point
 if __name__ == "__main__":
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+    n=int(sys.argv[1]) if len(sys.argv)>1 else 1000
     train(n)

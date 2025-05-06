@@ -1,3 +1,5 @@
+SUBMITTING = False
+
 
 from enum import nonmember
 import random
@@ -9,8 +11,9 @@ from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
 import time
-import pandas as pd
-import json
+
+if not SUBMITTING:
+    import json
 
 
 """
@@ -23,9 +26,9 @@ START_DEPTH = 1
 SHORTENING_FACTOR = 1
 ASTAR = False
 LARGE_VALUE = 999
-SPEEDUP_FACTOR = 1
+SPEEDUP_FACTOR = 50
 EVAL = "adaptive"
-RANDOM_START = 0
+RANDOM_START = 4
 
 class MinimaxSearchNode(Strategy):
     def __init__(self, state:BitBoard, parent = None, parent_action = None,
@@ -43,10 +46,12 @@ class MinimaxSearchNode(Strategy):
         self.astar = False
         self.cutoff_depth = 4
         self._logging_pv = False
-        
+        if SUBMITTING:
+            self.weights = {"centrality": 0.22914114594459534, "double_jumps": 0.3586330711841583,
+                             "distance": 0.927653968334198, "mobility": 0.19292308390140533}
+
         with open("weights2.json", "r") as wf:
             self.weights = json.load(wf)
-
 
 
     def check_gameover_next(self):
@@ -55,11 +60,12 @@ class MinimaxSearchNode(Strategy):
             # All the neural network stuff
             eval = 10 * self.simple_eval(new_state)
 
-            F = np.loadtxt("blue_pv_features.csv", delimiter=",", skiprows=1)
-            deltas = F[-1] - F[0]
-            norm = np.abs(deltas).sum() + 1e-8
-            adv = 100 * (deltas / norm) * eval
-            np.savetxt("blue_advantage.txt", adv, fmt="%.6f")
+            
+            # F = np.loadtxt("blue_pv_features.csv", delimiter=",", skiprows=1)
+            # deltas = F[-1] - F[0]
+            # norm = np.abs(deltas).sum() + 1e-8
+            # adv = 100 * (deltas / norm) * eval
+            # np.savetxt("blue_advantage.txt", adv, fmt="%.6f")
 
             with open("eval.txt", "w") as fp:
                 fp.write(f"{-eval}")
@@ -71,12 +77,12 @@ class MinimaxSearchNode(Strategy):
                 eval = 10 * self.simple_eval(new_state)
 
                 # All the neural network stuff
-                F = np.loadtxt("blue_pv_features.csv", delimiter=",", skiprows=1)
+                # F = np.loadtxt("blue_pv_features.csv", delimiter=",", skiprows=1)
     
-                deltas = F[-1] - F[0]
-                norm = np.abs(deltas).sum() + 1e-8
-                adv = 100 * (deltas / norm) * eval
-                np.savetxt("blue_advantage.txt", adv[1:], fmt="%.6f")
+                # deltas = F[-1] - F[0]
+                # norm = np.abs(deltas).sum() + 1e-8
+                # adv = 100 * (deltas / norm) * eval
+                # np.savetxt("blue_advantage.txt", adv[1:], fmt="%.6f")
                 
 
                 with open("eval.txt", "w") as fp:
