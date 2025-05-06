@@ -6,6 +6,7 @@ import math
 import numpy as np
 import heapq
 import itertools
+import random
 
 
 class BitBoard:
@@ -52,8 +53,9 @@ class BitBoard:
         for c in range(BOARD_N):
             if self.board[BOARD_N - 1][c] == self.FROG:
                 self.frog_border_count[self.FROG] += 1
-            elif self.board[0][c] == self.OPPONENT:
+            if self.board[0][c] == self.OPPONENT:
                 self.frog_border_count[self.OPPONENT] += 1
+
         return (
             self.frog_border_count[self.FROG] == BOARD_N - 2
             or self.frog_border_count[self.OPPONENT] == BOARD_N - 2
@@ -156,6 +158,27 @@ class BitBoard:
         possible_moves.append((GrowAction(), None))
         return possible_moves
 
+    def get_random_move(self):
+        all_pos = self.get_all_pos(self.current_player)
+
+        random.shuffle(all_pos)
+
+        # find the first position with at least one possible move
+        while True:
+            if not all_pos:
+                return (GrowAction(), None)
+
+            rand_pos = all_pos.pop()
+
+            possible_moves = self.get_possible_move(rand_pos, lazy_ret=True)
+
+            if possible_moves:
+                break
+
+        possible_moves.append((GrowAction(), None))
+
+        return random.choice(possible_moves)
+
     def get_all_moves(self):
         bts = self.board.tobytes()
 
@@ -201,7 +224,9 @@ class BitBoard:
     #     visited = set()
     #     return self.get_possible_move_rec(coord, visited)
 
-    def get_possible_move(self, coord: Coord) -> list[tuple[MoveAction, Coord]]:
+    def get_possible_move(
+        self, coord: Coord, lazy_ret=False
+    ) -> list[tuple[MoveAction, Coord]]:
         """
         Move-generation using primitive ints and per-path visited sets to avoid shared-state bugs.
         """
@@ -219,6 +244,9 @@ class BitBoard:
         is_valid = self.is_valid_move
         F, O = self.FROG, self.OPPONENT
         N = BOARD_N
+
+        if lazy_ret:
+            random.shuffle(self._OFFSETS)  # so that the first move is random
 
         while stack:
             r, c, path_dirs, visited, in_jump = stack.pop()
@@ -253,6 +281,9 @@ class BitBoard:
                         new_visited = visited.copy()
                         new_visited.add((land_r, land_c))
                         stack.append((land_r, land_c, new_dirs, new_visited, True))
+
+                if possible_moves and lazy_ret:
+                    return possible_moves  # get the first move
 
         return possible_moves
 
