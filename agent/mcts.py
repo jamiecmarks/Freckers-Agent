@@ -48,7 +48,7 @@ class MonteCarloTreeSearchNode(Strategy):
             self.depth = 0
 
     def untried_actions(self):
-        blocked = False
+        # blocked = False
         # for row in self.state.get_board():
         #     if np.sum(row) == 0:  # there is a 'block'
         #         blocked = True
@@ -67,30 +67,9 @@ class MonteCarloTreeSearchNode(Strategy):
         hops = all_moves[:-1]
         grows = all_moves[-1:]
 
-        # early in the search: explore hops first
-        # if self.n() < 5 and hops:
-        #     return hops
-
-        # once we've visited this node a handful of times,
-        # add Grow back in, sorted by priority
         actions = hops + grows
-        # actions.sort(key=lambda mv: self.state._move_priority(mv), reverse=True)
 
         return actions
-
-    def kuntried_actions(self):
-        blocked = False
-        for row in self.state.get_board():
-            if np.sum(row) == 0:  # there is a 'block'
-                blocked = True
-        if not blocked:
-            opt = self.state.get_all_optimal_moves()
-            # take the top 2–3 optimal, plus 30% of the rest at random
-            extra = random.sample(
-                self.state.get_all_moves()[:-1], k=int(0.3 * len(opt))
-            )
-            return opt[:-1] + extra + [(GrowAction(), None)]
-        return self.state.get_all_moves()
 
     def q(self):
         # return self._total_reward
@@ -107,20 +86,10 @@ class MonteCarloTreeSearchNode(Strategy):
             key=lambda mv: self.state._move_priority(mv), reverse=True
         )
         idx = 0  # pop the very best move first
-        # action_res = self._untried_actions.pop()
 
-        # if self.depth < 5 and self.depth > 1:
-        #     # try to pop a GrowAction first
-        #     for i, (act, res) in enumerate(self._untried_actions):
-        #         if isinstance(act, GrowAction):
-        #             idx = i
-        #             break
-        #     else:
-        #         idx = np.random.randint(len(self._untried_actions))
-        # else:
-        #     idx = np.random.randint(len(self._untried_actions))
         action_res = self._untried_actions.pop(idx)
         action, res = action_res
+
         next_state = self.state.move(action, res)
         next_state.toggle_player()
 
@@ -128,9 +97,9 @@ class MonteCarloTreeSearchNode(Strategy):
             next_state, parent=self, parent_action=action_res
         )
 
-        if next_state.is_game_over():
-            child_node._number_of_visits += 10
-            child_node._results[1] += 10
+        # if next_state.is_game_over():
+        #     child_node._number_of_visits += 10
+        #     child_node._results[1] += 10
 
         self.children.append(child_node)
         return child_node
@@ -143,70 +112,7 @@ class MonteCarloTreeSearchNode(Strategy):
             self.expand()
 
     def new_rollout_policy(self, state, depth=0):
-        """
-        epsilon-greedy + softmax-weighted heuristic playout policy.
-        """
-        # moves = state.get_all_moves()
-        test = state.get_random_move()
-        # print("random move is ", test)
-
-        return test
-
-        num_moves = len(moves)
-        if num_moves == 0:
-            return None
-
-        # 1) ε-greedy: 10% of the time, explore uniformly at random
-        #
-        eps = 0 if depth > 15 else 0.02
-        if np.random.rand() < eps:
-            return moves[np.random.randint(num_moves)]
-
-        # 2) Otherwise, score each move by your heuristic
-        mid_col = (BOARD_N - 1) // 2
-        scores = []
-        for action, res in moves:
-            res_state = state.move(action, res)
-            score = 0.0
-            if res is None:  # grow action
-                # early-game grow bonus, late-game penalty
-                ratio = len(res_state.get_all_moves()) / len(
-                    state.get_all_moves()
-                )  # the increase in moves that we get if we were to grow now
-                score += ratio * 0.1
-            else:
-                # reward long jumps
-                dist = abs(res.r - action.coord.r)
-                score += dist if dist > 0 else -0.5
-                # centering bonus early
-                if depth < 15:
-                    start_c, end_c = action.coord.c, res.c
-                    if abs(start_c - mid_col) > abs(end_c - mid_col):
-                        score += 0.1
-
-                coords = state.get_all_pos(res_state.get_current_player())
-
-                rows = [r for (r, _) in coords]
-                mean_r = sum(rows) / len(coords)  # mean row of frogs
-                spread = sum(
-                    (r - mean_r) ** 2 for r in rows
-                )  # find variance of frog rows, penalize too much spreading. Leaving froggy behind
-
-                score -= 0.1 * spread
-
-            scores.append(score)
-
-        # 3) Softmax to get a probability distribution
-        x = np.array(scores, dtype=np.float64)
-
-        # numerical stabilization
-        x = x - np.max(x)
-        exp_x = np.exp(x / 1.0)  # temperature = 1.0; tune if you like
-        probs = exp_x / exp_x.sum()
-
-        # 4) Sample one move according to that distribution
-        choice_idx = np.random.choice(num_moves, p=probs)
-        return moves[choice_idx]
+        return state.get_random_move()
 
     def rollout_policy(self, state, depth=0):
         weights = []
@@ -267,44 +173,20 @@ class MonteCarloTreeSearchNode(Strategy):
 
         # fast, stateless playout on BitBoard only
         while not state.is_game_over() and depth < max_depth:
-            if False:
-                # using board eval
-                next_states = {}
-                for action, res in state.get_all_moves():
-                    next_state = state.move(action, res)
-                    next_state.toggle_player()
-                    next_states[next_state] = next_state.evaluate_position()
+            # using rollout policy
+            action, res = self.new_rollout_policy(state, depth=depth)
 
-                raw = next_states.values()
-                offset = -min(raw) if min(raw) < 0 else 0
-                adjusted = [s + offset for s in raw]
-                total = sum(adjusted)
-                if total == 0:
-                    probs = [1 / len(raw)] * len(raw)
-                else:
-                    probs = [a / total for a in adjusted]
+            if (
+                res is not None and state.get_current_player() == self.root_player
+            ):  # moveaction
+                start = action.coord
+                end = res
+                playout_moves.append((start, end))
+                # don't rave growactions
 
-                state = random.choices(list(next_states.keys()), weights=probs)[0]
+            state = state.move(action, res, in_place=True)  # for performance
+            state.toggle_player()
 
-            if True:
-                # using rollout policy
-                action, res = self.new_rollout_policy(state, depth=depth)
-
-                if (
-                    res is not None and state.get_current_player() == self.root_player
-                ):  # moveaction
-                    start = action.coord
-                    end = res
-                    playout_moves.append((start, end))
-                    # don't rave growactions
-
-                state = state.move(action, res, in_place=True)  # for performance
-                state.toggle_player()
-
-            # state.toggle_player()
-            # action, res = self.rollout_policy(state, depth=self.depth + depth // 2)
-            # state = state.move(action, res)
-            # state.toggle_player()
             depth += 1
 
         result = 0
@@ -343,8 +225,6 @@ class MonteCarloTreeSearchNode(Strategy):
                 result = -eval_score
 
         return result, playout_moves
-        # return 1 if state.evaluate_position() > 0 else -1
-        # return 1 if self.heuristic_score(state) > 0 else -1
 
     def heuristic_score(self, state):
         score = 0
@@ -375,7 +255,6 @@ class MonteCarloTreeSearchNode(Strategy):
     def backpropagate(self, result, playout_moves=None):
         self._number_of_visits += 1
         self._results[result] += 1
-        # self._total_reward += result
 
         if playout_moves:
             for a in playout_moves:
@@ -406,7 +285,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 return node.expand()
 
             # otherwise, pick the best child by UCB
-            node = node.UCB_choose()
+            node = node.UCB_rave_choose()
 
         return node
 
@@ -479,29 +358,6 @@ class MonteCarloTreeSearchNode(Strategy):
             if score > best_score:
                 best, best_score = child, score
         return best
-
-    def kUCB_choose(self):
-        # return self.best_child()
-        for child in self.children:
-            if child.n() == 0:
-                return child
-
-        # try to add move_prio to UCB1
-        scores = []
-        for c in self.children:
-            value = c.q() / (c.n() + 1e-5)
-            exploration = self.dynamic_c() * np.sqrt(
-                (2 * np.log(self.n() + 1) / (c.n() + 1e-5))
-            )
-            priority_bonus = self.state._move_priority(c.parent_action)
-            scores.append(value + exploration + 0.1 * priority_bonus)  # tune this
-        return self.children[np.argmax(scores)]
-
-        scores = [
-            (c.q() / c.n()) + self.dynamic_c() * np.sqrt((2 * np.log(self.n()) / c.n()))
-            for c in self.children
-        ]
-        return self.children[np.argmax(scores)]
 
     def choose_next_action(self):
         # break ties by winrate
