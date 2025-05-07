@@ -267,13 +267,22 @@ class BitBoard:
                 return (GrowAction(), None)
 
             rand_pos = all_pos.pop()
+
+            if self.current_player == self.FROG:
+                if rand_pos.r == BOARD_N - 1:
+                    continue
+            else:
+                if rand_pos.r == 0:
+                    continue
+
             possible_moves = self.get_possible_move(rand_pos, lazy_ret=True)
 
             if possible_moves:
                 break
 
         possible_moves.append((GrowAction(), None))
-        return random.choice(possible_moves)
+
+        return random.choices(possible_moves, k=1, weights=[4 / 5, 1 / 5])[0]
 
     def get_all_moves(self):
         """Get all possible moves for the current player"""

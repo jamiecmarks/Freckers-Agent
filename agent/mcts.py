@@ -36,7 +36,9 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._total_reward = 0
         self._untried_actions = self.untried_actions()
-        self.c = 0.22
+        self.c = 0.5
+        self.rave_weight = 0.8
+        self.progressive_bias_weight = 0.4
 
         # trying rave stuff
         self._rave_visits = defaultdict(int)
@@ -80,11 +82,11 @@ class MonteCarloTreeSearchNode(Strategy):
     def n(self):
         return self._number_of_visits
 
-    def expand(self):
+    def expand_helper(self):
         # sort by heuristic priority once
-        # self._untried_actions.sort(
-        #     key=lambda mv: self.state._move_priority(mv), reverse=True
-        # )
+        self._untried_actions.sort(
+            key=lambda mv: self.state._move_priority(mv), reverse=True
+        )
         idx = 0  # pop the very best move first
 
         action_res = self._untried_actions.pop(idx)
@@ -104,6 +106,17 @@ class MonteCarloTreeSearchNode(Strategy):
         self.children.append(child_node)
         return child_node
 
+    def expand(self):
+        """Balanced expansion with progressive bias"""
+        # Apply progressive bias to node initialization
+        child = self.expand_helper()
+        action_res = child.parent_action
+        child._number_of_visits += 1
+        child._results[1] += self.progressive_bias_weight * self.state._move_priority(
+            action_res
+        )
+        return child
+
     def is_terminal_node(self):
         return self.state.is_game_over()
 
@@ -112,6 +125,7 @@ class MonteCarloTreeSearchNode(Strategy):
             self.expand()
 
     def new_rollout_policy(self, state, depth=0):
+        # return random.choice(state.get_all_moves())
         return state.get_random_move()
 
     def rollout_policy(self, state, depth=0):
@@ -122,7 +136,11 @@ class MonteCarloTreeSearchNode(Strategy):
         mid_col = (BOARD_N - 1) // 2
         curr_player = state.get_current_player()
         scores = []
-        moves = state.get_all_moves()
+        moves = []
+
+        # try getting a sample of all the moves to avoid genning all of them
+        for i in range(2):
+            moves.extend([state.get_random_move()])
 
         for action, res in moves:
             score = 0
@@ -285,7 +303,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 return node.expand()
 
             # otherwise, pick the best child by UCB
-            node = node.UCB_rave_choose()
+            node = node.UCB_choose()
 
         return node
 
@@ -296,7 +314,7 @@ class MonteCarloTreeSearchNode(Strategy):
             if not node.is_fully_expanded():
                 return node.expand()  # expand one child and return it
             else:
-                node = node.UCB_rave_choose()
+                node = node.UCB_choose()
         return node
 
     def UCB_rave_choose(self):
@@ -396,7 +414,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 break
             # since hard_deadline = t0 + alloc_time ≤ t0 + (total_time - safety_margin),
             # we are guaranteed never to go beyond the referee’s remaining clock.
-            leaf = self.new_tree_policy()
+            leaf = self._tree_policy()
             reward, playout_moves = leaf.simulate_playout()
             leaf.backpropagate(reward, playout_moves)
             sims += 1
