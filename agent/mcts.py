@@ -82,9 +82,9 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def expand(self):
         # sort by heuristic priority once
-        self._untried_actions.sort(
-            key=lambda mv: self.state._move_priority(mv), reverse=True
-        )
+        # self._untried_actions.sort(
+        #     key=lambda mv: self.state._move_priority(mv), reverse=True
+        # )
         idx = 0  # pop the very best move first
 
         action_res = self._untried_actions.pop(idx)
