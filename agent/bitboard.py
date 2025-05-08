@@ -141,14 +141,15 @@ class BitBoard:
             return self.EMPTY
 
     def _set_cell(self, r, c, value):
+        """Sets the cell at (r,c) to value: `value` using bit operations"""
         if not (0 <= r < BOARD_N and 0 <= c < BOARD_N):
             return
 
         pos = r * BOARD_N + c
         bit_pos = 1 << pos
 
-        # Clear the cell first in all bitboards
-        mask = ~bit_pos
+        # Clear the cell in all representations
+        mask = ~bit_pos  # bitwise NOT, flips the bits
         self.lilly_bits &= mask
         self.frog_bits &= mask
         self.opp_bits &= mask
@@ -165,13 +166,13 @@ class BitBoard:
         self._update_occupied_mask()
 
     def get_ply_count(self):
+        """Ply count here is the number of turns played so far in the game"""
         return self.ply_count
 
     def get_board(self):
         """Returns the board as a 2D numpy array for compatibility"""
         board = np.zeros((BOARD_N, BOARD_N), dtype=int)
 
-        # Process each bit layer
         for r in range(BOARD_N):
             for c in range(BOARD_N):
                 pos = r * BOARD_N + c
@@ -183,7 +184,6 @@ class BitBoard:
                     board[r][c] = self.RED
                 elif self.opp_bits & bit_pos:
                     board[r][c] = self.BLUE
-                # EMPTY case already initialized to zero
 
         return board
 
@@ -191,26 +191,29 @@ class BitBoard:
         return self.current_player
 
     def toggle_player(self):
-        self.current_player = (
-            self.BLUE if self.current_player == self.RED else self.RED
-        )
+        """Toggles player in place for this bitboard"""
+        self.current_player = self.BLUE if self.current_player == self.RED else self.RED
 
     def is_game_over(self):
-        """Check if the game is over - using bit operations for efficiency"""
+        """Check if the game is over"""
         self.frog_border_count = {self.RED: 0, self.BLUE: 0}
 
         # Get bottom row mask
         bottom_row_mask = self._ROW_MASKS[BOARD_N - 1]
 
-        # Count frogs in bottom row using bit operations
-        frogs_in_bottom = bin(self.frog_bits & bottom_row_mask).count("1")
-        self.frog_border_count[self.RED] = frogs_in_bottom
+        # Count frogs in bottom row
+        frogs_in_bottom = bin(self.frog_bits & bottom_row_mask).count(
+            "1"
+        )  # how many 1s are there ?
+        self.frog_border_count[self.RED] = frogs_in_bottom  # frogs here means RED frogs
 
         # Get top row mask
         top_row_mask = self._ROW_MASKS[0]
 
         # Count opponents in top row using bit operations
-        opps_in_top = bin(self.opp_bits & top_row_mask).count("1")
+        opps_in_top = bin(self.opp_bits & top_row_mask).count(
+            "1"
+        )  # blue frogs, all from pov of red for understanding
         self.frog_border_count[self.BLUE] = opps_in_top
 
         return (
@@ -219,6 +222,7 @@ class BitBoard:
         )
 
     def get_winner(self):
+        """Returns 1 if the current player won, -1 if the opponent won, and 0 if it's a draw"""
         if max(self.frog_border_count.values()) == BOARD_N - 2:
             if (
                 self.frog_border_count[self.RED] == BOARD_N - 2
@@ -241,6 +245,7 @@ class BitBoard:
         return 0
 
     def move(self, action: MoveAction, res: Coord | None = None, in_place=False):
+        """Moves a piece according to the action described in the action object combined with an optiional result coordinate for quicker calculation"""
         if in_place:
             new_board = self
         else:
@@ -257,6 +262,7 @@ class BitBoard:
             start_pos = action.coord.r * BOARD_N + action.coord.c
             start_bit = 1 << start_pos
 
+            # find out what type of piece we're working with here
             if self.frog_bits & start_bit:
                 fill = self.RED
             elif self.opp_bits & start_bit:
@@ -267,11 +273,13 @@ class BitBoard:
             fill = self.current_player
 
         if isinstance(action, GrowAction):
-            # Handle GrowAction efficiently using bit operations
+            # Handle GrowAction using bit operations
             pieces_to_check = (
                 self.frog_bits if self.current_player == self.RED else self.opp_bits
-            )
-            empty_cells = ~self.occupied_mask  # All empty cells
+            )  # assume grows happen from the perspective of the current player
+            empty_cells = (
+                ~self.occupied_mask
+            )  # get all unoccupied cells using bitwise NOT
 
             # For each direction, shift the player pieces and get potential growth spots
             growth_spots = 0
@@ -309,13 +317,13 @@ class BitBoard:
 
         elif res is not None:
             # Handle move with specified result
-            # Get bit positions
+            # Get the bit positions
             start_pos = action.coord.r * BOARD_N + action.coord.c
             end_pos = res.r * BOARD_N + res.c
             start_bit = 1 << start_pos
             end_bit = 1 << end_pos
 
-            # Clear start position and set end position
+            # Easy case, just move the piece leaving an empty spot
             if fill == self.RED:
                 new_board.frog_bits &= ~start_bit
                 new_board.frog_bits |= end_bit
@@ -332,7 +340,7 @@ class BitBoard:
             start_r, start_c = action.coord.r, action.coord.c
             next_r, next_c = start_r, start_c
 
-            # Fast path for computing destination
+            # We don't know where this frog ended up, so we go in all the directions greedily until we find the resultant position
             for direction in action.directions:
                 dr, dc = direction.value.r, direction.value.c
                 found_move = False
@@ -406,7 +414,7 @@ class BitBoard:
     def _cached_moves(board_bytes: bytes, player: int, dtype_str: str):
         """
         Reconstruct a bitboard from its raw bytes + player, then
-        call the *uncached* move generator.
+        call the function to get uncached moves
         """
         # Rebuild the numpy array in the right dtype & shape:
         arr = np.frombuffer(board_bytes, dtype=np.dtype(dtype_str)).copy()
@@ -417,7 +425,7 @@ class BitBoard:
         return bb._all_moves_uncached()
 
     def _all_moves_uncached(self):
-        """Get all possible moves (uncached)"""
+        """Get all possible moves using iterative logic"""
         possible_moves = []
 
         # Use bit operations to efficiently find all pieces of current player
@@ -426,11 +434,12 @@ class BitBoard:
         for pos in player_positions:
             possible_moves.extend(self.get_possible_move(pos))
 
+        # GrowAction is always possible
         possible_moves.append((GrowAction(), None))
         return possible_moves
 
     def get_random_move(self):
-        """Get a random valid move"""
+        """Get a random valid move lazily, for efficiency"""
         # Get current player's pieces efficiently
         if self.current_player == self.RED:
             player_bits = self.frog_bits
@@ -455,12 +464,6 @@ class BitBoard:
         # Find the first position with at least one possible move
         while all_pos:
             rand_pos = all_pos.pop()
-            if self.current_player == self.RED:
-                if rand_pos.r == BOARD_N - 1:
-                    continue
-            else:
-                if rand_pos.r == 0:
-                    continue
             possible_moves = self.get_possible_move(rand_pos, lazy_ret=True)
             if possible_moves:
                 break
@@ -469,12 +472,16 @@ class BitBoard:
             return (GrowAction(), None)
 
         # Add GrowAction and choose randomly
+        if rand_pos.r == forbidden_row:
+            return possible_moves[
+                0
+            ]  # Try to avoid GrowAction loops when near the end of the game
+
         possible_moves.append((GrowAction(), None))
         return random.choices(possible_moves, k=1, weights=[4 / 5, 1 / 5])[0]
 
     def get_all_moves(self):
         """Get all possible moves for the current player"""
-        # Convert to numpy array for compatibility with the original function
         board_np = self.get_board()
         bts = board_np.tobytes()
 
@@ -485,14 +492,13 @@ class BitBoard:
         self, coord: Coord, lazy_ret=False
     ) -> list[tuple[MoveAction, Coord]]:
         """
-        Optimized move-generation using bit operations for faster processing
+        Iterative move generation using a stack-based approach. If lazy_ret = True we just return the first move we come across for efficiency
         """
         possible_moves = []
         forward = 1 if self.current_player == self.RED else -1
 
         start_r, start_c = coord.r, coord.c
 
-        # Optimize stack-based approach for single-step and jumps
         stack = [(start_r, start_c, [], {(start_r, start_c)}, False)]
 
         # Pre-shuffle offsets for random first move
@@ -569,7 +575,7 @@ class BitBoard:
 
         return possible_moves
 
-    def is_valid_move(self, move: MoveAction, forward: int = 1) -> bool:
+    def is_valid_move(self, move: MoveAction, forward: int = 1):
         """
         Efficiently validates moves using bit operations
         """
@@ -582,7 +588,7 @@ class BitBoard:
             d = directions[idx]
             dr, dc = d.value.r, d.value.c
 
-            # Fast forward check
+            # Fast forward check, only forward moves are valid
             if dr != forward and dr != 0:
                 return False
 

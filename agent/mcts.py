@@ -227,36 +227,12 @@ class MonteCarloTreeSearchNode(Strategy):
         t0 = time.perf_counter()
         rem = self.time_budget - safety_margin
         assert rem > 0
-
-        # Rough estimate of how many moves remain
         move_no = min(self.state.get_ply_count() // 2, self.MAX_PLY // 2)
-        if MonteCarloTreeSearchNode.AVG_LEN:
-            move_no = (
-                move_no
-                * self.MAX_PLY
-                / max(1, math.ceil(MonteCarloTreeSearchNode.AVG_LEN / 2))
-            )
-
-        # Compute geometric denominator
         geo = decay**move_no - decay ** (self.MAX_PLY // 2)
-
-        # --- Prevent division by zero ---
-        if abs(geo) < 1e-12:
-            # Either all remaining weight is at one end, or decay==1. Just split time evenly.
-            slice_t = rem / max(1, (self.MAX_PLY // 2) - move_no + 1)
-        else:
-            slice_t = rem * (1 - decay) * (decay**move_no) / geo
-
+        slice_t = rem * (1 - decay) * decay**move_no / geo
         deadline = t0 + slice_t
         sims = 0
-        # t0 = time.perf_counter()
-        # rem = self.time_budget - safety_margin
-        # assert rem > 0
-        # move_no = min(self.state.get_ply_count() // 2, self.MAX_PLY // 2)
-        # geo = decay**move_no - decay ** (self.MAX_PLY // 2)
-        # slice_t = rem * (1 - decay) * decay**move_no / geo
-        # deadline = t0 + slice_t
-        # sims = 0
+
         while time.perf_counter() < deadline:
             leaf = self._tree_policy()
             res, amaf = leaf._simulate()
