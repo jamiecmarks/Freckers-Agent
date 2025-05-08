@@ -38,7 +38,7 @@ def _action_key(action: MoveAction, res: Optional[Coord]) -> Tuple:
 
 
 def _row_prog(player: int, r0: int, r1: int) -> int:
-    return (r1 - r0) if player == BitBoard.FROG else (r0 - r1)
+    return (r1 - r0) if player == BitBoard.RED else (r0 - r1)
 
 
 # quick hop‑count cache for grow heuristic ----------------------------------
@@ -198,9 +198,9 @@ class MonteCarloTreeSearchNode(Strategy):
             f, o = bb.frog_border_count.values()
             w = None
             if f == BOARD_N - 2 and o != BOARD_N - 2:
-                w = BitBoard.FROG
+                w = BitBoard.RED
             elif o == BOARD_N - 2 and f != BOARD_N - 2:
-                w = BitBoard.OPPONENT
+                w = BitBoard.BLUE
             res = 0 if w is None else (1 if w == self.root_player else -1)
         else:
             s = bb.evaluate_position()
@@ -227,13 +227,26 @@ class MonteCarloTreeSearchNode(Strategy):
         t0 = time.perf_counter()
         rem = self.time_budget - safety_margin
         assert rem > 0
+
+        # Rough estimate of how many moves remain
         move_no = min(self.state.get_ply_count() // 2, self.MAX_PLY // 2)
         if MonteCarloTreeSearchNode.AVG_LEN:
             move_no = (
-                move_no * self.MAX_PLY / math.ceil(self.AVG_LEN / 2)
-            )  # convert our move_no to be relative to the average depth we see in sims, try to squeeze out as much time as possible
+                move_no
+                * self.MAX_PLY
+                / max(1, math.ceil(MonteCarloTreeSearchNode.AVG_LEN / 2))
+            )
+
+        # Compute geometric denominator
         geo = decay**move_no - decay ** (self.MAX_PLY // 2)
-        slice_t = rem * (1 - decay) * decay**move_no / geo
+
+        # --- Prevent division by zero ---
+        if abs(geo) < 1e-12:
+            # Either all remaining weight is at one end, or decay==1. Just split time evenly.
+            slice_t = rem / max(1, (self.MAX_PLY // 2) - move_no + 1)
+        else:
+            slice_t = rem * (1 - decay) * (decay**move_no) / geo
+
         deadline = t0 + slice_t
         sims = 0
         # t0 = time.perf_counter()
