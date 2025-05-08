@@ -36,7 +36,7 @@ class MonteCarloTreeSearchNode(Strategy):
         self._results[-1] = 0
         self._total_reward = 0
         self._untried_actions = self.untried_actions()
-        self.c = 0.5
+        self.c = 0.222
         self.rave_weight = 0.8
         self.progressive_bias_weight = 0.4
 
@@ -84,9 +84,9 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def expand_helper(self):
         # sort by heuristic priority once
-        self._untried_actions.sort(
-            key=lambda mv: self.state._move_priority(mv), reverse=True
-        )
+        # self._untried_actions.sort(
+        #     key=lambda mv: self.state._move_priority(mv), reverse=True
+        # )
         idx = 0  # pop the very best move first
 
         action_res = self._untried_actions.pop(idx)
@@ -112,9 +112,10 @@ class MonteCarloTreeSearchNode(Strategy):
         child = self.expand_helper()
         action_res = child.parent_action
         child._number_of_visits += 1
-        child._results[1] += self.progressive_bias_weight * self.state._move_priority(
-            action_res
-        )
+        # child._results[1] += 1
+        # self.progressive_bias_weight * self.state._move_priority(
+        #     action_res
+        # )
         return child
 
     def is_terminal_node(self):
@@ -303,7 +304,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 return node.expand()
 
             # otherwise, pick the best child by UCB
-            node = node.UCB_choose()
+            node = node.UCB_rave_choose()
 
         return node
 
@@ -414,7 +415,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 break
             # since hard_deadline = t0 + alloc_time ≤ t0 + (total_time - safety_margin),
             # we are guaranteed never to go beyond the referee’s remaining clock.
-            leaf = self._tree_policy()
+            leaf = self.new_tree_policy()
             reward, playout_moves = leaf.simulate_playout()
             leaf.backpropagate(reward, playout_moves)
             sims += 1
