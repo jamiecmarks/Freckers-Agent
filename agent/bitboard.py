@@ -10,7 +10,7 @@ from functools import lru_cache
 
 
 class BitBoard:
-    # True bitboard constants - each cell is 2 bits (00 = EMPTY, 01 = LILLY, 10 = FROG, 11 = OPPONENT)
+    # Cell type constants - kept for interface compatibility
     EMPTY = 0b00
     LILLY = 0b01
     FROG = 0b10
@@ -29,70 +29,116 @@ class BitBoard:
     ]
 
     def __init__(self, board=None):
+        # Initialize three 64-bit integers to represent the entire board
+        # Each bit corresponds to one cell, with bit position = r*BOARD_N + c
+        self.lilly_bits = 0  # Bits for lily pads
+        self.frog_bits = 0  # Bits for frog pieces
+        self.opp_bits = 0  # Bits for opponent pieces
+
         if board is None:
             # Initialize a fresh bitboard
-            self.bitboard = self._create_start_bitboard()
+            self._create_start_bitboard()
         elif isinstance(board, np.ndarray):
             # Convert numpy array to bitboard
-            self.bitboard = self._convert_numpy_to_bitboard(board)
+            self._convert_numpy_to_bitboard(board)
         else:
-            # Assume it's already a bitboard (int array)
-            self.bitboard = board.copy()
+            # Assume it's already a bitboard (copy from another BitBoard)
+            self.lilly_bits = board[0]
+            self.frog_bits = board[1]
+            self.opp_bits = board[2]
 
         self.current_player = self.FROG
         self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
         self.ply_count = 0
 
     def _create_start_bitboard(self):
-        """Creates the starting bitboard configuration"""
-        # Create a board of all EMPTYs (each row is a 2N-bit integer)
-        bitboard = [0] * BOARD_N
+        """Creates the starting bitboard configuration using bit operations"""
+        # Start with empty board
+        self.lilly_bits = 0
+        self.frog_bits = 0
+        self.opp_bits = 0
 
-        # Set top row (FROG pieces - 10)
+        # Set top row (FROG pieces)
         for c in range(1, BOARD_N - 1):
-            bitboard[0] |= self.FROG << (c * 2)
+            self.frog_bits |= 1 << (0 * BOARD_N + c)
 
-        # Set bottom row (OPPONENT pieces - 11)
+        # Set bottom row (OPPONENT pieces)
         for c in range(1, BOARD_N - 1):
-            bitboard[BOARD_N - 1] |= self.OPPONENT << (c * 2)
+            self.opp_bits |= 1 << ((BOARD_N - 1) * BOARD_N + c)
 
         # Set lily pads in row 1 and BOARD_N - 2
         for c in range(1, BOARD_N - 1):
-            bitboard[1] |= self.LILLY << (c * 2)
-            bitboard[BOARD_N - 2] |= self.LILLY << (c * 2)
+            self.lilly_bits |= 1 << (1 * BOARD_N + c)
+            self.lilly_bits |= 1 << ((BOARD_N - 2) * BOARD_N + c)
 
         # Set corner lily pads
-        bitboard[0] |= self.LILLY << 0  # Top left
-        bitboard[0] |= self.LILLY << ((BOARD_N - 1) * 2)  # Top right
-        bitboard[BOARD_N - 1] |= self.LILLY << 0  # Bottom left
-        bitboard[BOARD_N - 1] |= self.LILLY << ((BOARD_N - 1) * 2)  # Bottom right
-
-        return bitboard
+        self.lilly_bits |= 1 << (0 * BOARD_N + 0)  # Top left
+        self.lilly_bits |= 1 << (0 * BOARD_N + (BOARD_N - 1))  # Top right
+        self.lilly_bits |= 1 << ((BOARD_N - 1) * BOARD_N + 0)  # Bottom left
+        self.lilly_bits |= 1 << (
+            (BOARD_N - 1) * BOARD_N + (BOARD_N - 1)
+        )  # Bottom right
 
     def _convert_numpy_to_bitboard(self, np_board):
         """Converts a numpy array board to a bitboard representation"""
-        bitboard = [0] * BOARD_N
+        self.lilly_bits = 0
+        self.frog_bits = 0
+        self.opp_bits = 0
+
         for r in range(BOARD_N):
             for c in range(BOARD_N):
-                # Set 2 bits at the appropriate position
-                bitboard[r] |= np_board[r][c] << (c * 2)
-        return bitboard
+                pos = r * BOARD_N + c
+                cell_value = np_board[r][c]
+
+                if cell_value == self.LILLY:
+                    self.lilly_bits |= 1 << pos
+                elif cell_value == self.FROG:
+                    self.frog_bits |= 1 << pos
+                elif cell_value == self.OPPONENT:
+                    self.opp_bits |= 1 << pos
+
+    def bitboard(self):
+        """Return a representation of the bitboard for compatibility with copy operations"""
+        return [self.lilly_bits, self.frog_bits, self.opp_bits]
 
     def _get_cell(self, r, c):
-        """Gets the value of a cell at (r,c)"""
+        """Gets the value of a cell at (r,c) using bit operations"""
         if not (0 <= r < BOARD_N and 0 <= c < BOARD_N):
             return None
-        # Extract 2 bits at position c
-        return (self.bitboard[r] >> (c * 2)) & 0b11
+
+        pos = r * BOARD_N + c
+        bit_pos = 1 << pos
+
+        if self.lilly_bits & bit_pos:
+            return self.LILLY
+        elif self.frog_bits & bit_pos:
+            return self.FROG
+        elif self.opp_bits & bit_pos:
+            return self.OPPONENT
+        else:
+            return self.EMPTY
 
     def _set_cell(self, r, c, value):
-        """Sets the value of a cell at (r,c)"""
+        """Sets the value of a cell at (r,c) using bit operations"""
         if not (0 <= r < BOARD_N and 0 <= c < BOARD_N):
             return
-        # Clear the 2 bits at position c
-        self.bitboard[r] &= ~(0b11 << (c * 2))
-        # Set the 2 bits to the new value
-        self.bitboard[r] |= value << (c * 2)
+
+        pos = r * BOARD_N + c
+        bit_pos = 1 << pos
+
+        # Clear the cell first
+        self.lilly_bits &= ~bit_pos
+        self.frog_bits &= ~bit_pos
+        self.opp_bits &= ~bit_pos
+
+        # Set the new value
+        if value == self.LILLY:
+            self.lilly_bits |= bit_pos
+        elif value == self.FROG:
+            self.frog_bits |= bit_pos
+        elif value == self.OPPONENT:
+            self.opp_bits |= bit_pos
+        # EMPTY case: all bits already cleared
 
     def get_ply_count(self):
         return self.ply_count
@@ -114,19 +160,26 @@ class BitBoard:
         )
 
     def is_game_over(self):
+        """Check if the game is over - using bit operations for efficiency"""
         self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
 
         # Check bottom row for FROG pieces
-        row = self.bitboard[BOARD_N - 1]
+        bottom_row_mask = 0
         for c in range(BOARD_N):
-            if ((row >> (c * 2)) & 0b11) == self.FROG:
-                self.frog_border_count[self.FROG] += 1
+            bottom_row_mask |= 1 << ((BOARD_N - 1) * BOARD_N + c)
+
+        # Count frogs in bottom row
+        frogs_in_bottom = bin(self.frog_bits & bottom_row_mask).count("1")
+        self.frog_border_count[self.FROG] = frogs_in_bottom
 
         # Check top row for OPPONENT pieces
-        row = self.bitboard[0]
+        top_row_mask = 0
         for c in range(BOARD_N):
-            if ((row >> (c * 2)) & 0b11) == self.OPPONENT:
-                self.frog_border_count[self.OPPONENT] += 1
+            top_row_mask |= 1 << (0 * BOARD_N + c)
+
+        # Count opponents in top row
+        opps_in_top = bin(self.opp_bits & top_row_mask).count("1")
+        self.frog_border_count[self.OPPONENT] = opps_in_top
 
         return (
             self.frog_border_count[self.FROG] == BOARD_N - 2
@@ -157,9 +210,13 @@ class BitBoard:
 
     def move(self, action: MoveAction, res: Coord | None = None, in_place=False):
         if in_place:
-            board_copy = self.bitboard
+            new_board = self
         else:
-            board_copy = self.bitboard.copy()
+            # Create a new BitBoard with the same state
+            new_board = BitBoard()
+            new_board.lilly_bits = self.lilly_bits
+            new_board.frog_bits = self.frog_bits
+            new_board.opp_bits = self.opp_bits
 
         fill = self.current_player
 
@@ -167,7 +224,7 @@ class BitBoard:
             fill = self._get_cell(action.coord.r, action.coord.c)
 
         if isinstance(action, GrowAction):
-            # Handle GrowAction
+            # Handle GrowAction - add lily pads next to current pieces
             for pos in self.get_all_pos(fill):
                 for direction in Direction:
                     next_c = pos.c + direction.value.c
@@ -177,16 +234,12 @@ class BitBoard:
                         and 0 <= next_r < BOARD_N
                         and self._get_cell(next_r, next_c) == self.EMPTY
                     ):
-                        # Set the cell in the copied board
-                        new_board = BitBoard(board_copy)
+                        # Set the cell to lily pad
                         new_board._set_cell(next_r, next_c, self.LILLY)
-                        board_copy = new_board.bitboard
         elif res is not None:
             # Handle move with specified result
-            new_board = BitBoard(board_copy)
             new_board._set_cell(action.coord.r, action.coord.c, self.EMPTY)
             new_board._set_cell(res.r, res.c, fill)
-            board_copy = new_board.bitboard
         else:
             # Handle move with computed result
             next_coord = action.coord
@@ -197,38 +250,47 @@ class BitBoard:
                     if self._get_cell(next_coord.r, next_coord.c) == self.LILLY:
                         found_move = True
 
-            new_board = BitBoard(board_copy)
             new_board._set_cell(action.coord.r, action.coord.c, self.EMPTY)
             new_board._set_cell(next_coord.r, next_coord.c, fill)
-            board_copy = new_board.bitboard
 
-        new_board = BitBoard(board_copy)
         new_board.current_player = self.current_player
         new_board.ply_count = self.ply_count + 1
         return new_board
 
     def get_all_pos(self, pos_type):
-        """Find all positions of a given piece type"""
+        """Find all positions of a given piece type using bit operations"""
         out = []
-        for r in range(BOARD_N):
-            row = self.bitboard[r]
-            for c in range(BOARD_N):
-                # Extract cell value (2 bits)
-                cell = (row >> (c * 2)) & 0b11
-                if cell == pos_type:
-                    out.append(Coord(r, c))
+        # Choose the correct bitboard based on piece type
+        if pos_type == self.LILLY:
+            bits = self.lilly_bits
+        elif pos_type == self.FROG:
+            bits = self.frog_bits
+        elif pos_type == self.OPPONENT:
+            bits = self.opp_bits
+        else:
+            return out  # Empty not tracked directly
+
+        # Iterate through all set bits
+        temp_bits = bits
+        while temp_bits:
+            # Extract least significant 1-bit
+            lsb = temp_bits & -temp_bits
+            # Calculate position index
+            pos_idx = bin(lsb).count("0") - 1
+            # Convert to row, col
+            r, c = pos_idx // BOARD_N, pos_idx % BOARD_N
+            out.append(Coord(r, c))
+            # Clear the bit
+            temp_bits &= ~lsb
+
         return out
 
     def get_start_board(self):
         """Returns the starting board as a numpy array for compatibility"""
-        bitboard = self._create_start_bitboard()
-        board = np.zeros((BOARD_N, BOARD_N), dtype=int)
-
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                board[r][c] = (bitboard[r] >> (c * 2)) & 0b11
-
-        return board
+        # Create a temporary board with start position
+        temp_board = BitBoard()
+        temp_board._create_start_bitboard()
+        return temp_board.get_board()
 
     @staticmethod
     def _cached_moves(board_bytes: bytes, player: int, dtype_str: str):
@@ -247,10 +309,12 @@ class BitBoard:
     def _all_moves_uncached(self):
         """Get all possible moves (uncached)"""
         possible_moves = []
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if self._get_cell(r, c) == self.current_player:
-                    possible_moves.extend(self.get_possible_move(Coord(r, c)))
+
+        # Use bit operations to efficiently find all pieces of current player
+        player_positions = self.get_all_pos(self.current_player)
+
+        for pos in player_positions:
+            possible_moves.extend(self.get_possible_move(pos))
 
         possible_moves.append((GrowAction(), None))
         return possible_moves
@@ -267,13 +331,10 @@ class BitBoard:
                 return (GrowAction(), None)
 
             rand_pos = all_pos.pop()
-
-            if self.current_player == self.FROG:
-                if rand_pos.r == BOARD_N - 1:
-                    continue
-            else:
-                if rand_pos.r == 0:
-                    continue
+            if rand_pos.r == 0 and self.current_player == self.OPPONENT:
+                continue
+            if rand_pos.r == BOARD_N - 1 and self.current_player == self.FROG:
+                continue
 
             possible_moves = self.get_possible_move(rand_pos, lazy_ret=True)
 
@@ -281,8 +342,7 @@ class BitBoard:
                 break
 
         possible_moves.append((GrowAction(), None))
-
-        return random.choices(possible_moves, k=1, weights=[4 / 5, 1 / 5])[0]
+        return random.choice(possible_moves)
 
     def get_all_moves(self):
         """Get all possible moves for the current player"""
@@ -324,8 +384,6 @@ class BitBoard:
                     if is_valid(move, forward):
                         dest_r, dest_c = r + dr, c + dc
                         possible_moves.append((move, Coord(dest_r, dest_c)))
-                        if lazy_ret:
-                            return possible_moves
 
                 # Attempt a jump
                 mid_r, mid_c = r + dr, c + dc
@@ -347,13 +405,13 @@ class BitBoard:
                         action = MoveAction(coord, new_dirs)
                         possible_moves.append((action, Coord(land_r, land_c)))
 
-                        if lazy_ret:
-                            return possible_moves
-
                         # Create a new visited set for this path to avoid interference
                         new_visited = visited.copy()
                         new_visited.add((land_r, land_c))
                         stack.append((land_r, land_c, new_dirs, new_visited, True))
+
+                if possible_moves and lazy_ret:
+                    return possible_moves  # get the first move
 
         return possible_moves
 
@@ -363,9 +421,6 @@ class BitBoard:
         directions = move.directions
         n_dirs = len(directions)
         _get_cell = self._get_cell
-
-        # Precompute a bitmask for "is frog or opponent?"
-        foe_mask = self.FROG | self.OPPONENT
 
         # Loop without enumerate for better performance
         for idx in range(n_dirs):
@@ -389,7 +444,7 @@ class BitBoard:
             # Intermediate or final check
             if idx < n_dirs - 1:
                 # must be a piece (frog or opp)
-                if (cell & foe_mask) == 0:
+                if cell != self.FROG and cell != self.OPPONENT:
                     return False
             else:
                 # landing must be lily
@@ -414,12 +469,8 @@ class BitBoard:
 
         # 1) GrowAction: more valuable the fewer lilies on board
         if isinstance(action, GrowAction):
-            # Count lilies by iterating through each cell
-            lily_count = 0
-            for r in range(BOARD_N):
-                for c in range(BOARD_N):
-                    if self._get_cell(r, c) == BitBoard.LILLY:
-                        lily_count += 1
+            # Count lilies using bit operations
+            lily_count = bin(self.lilly_bits).count("1")
 
             # scale [0..1]: when lily_count=0 → 1.0, when full → 0.0
             grow_score = 1.0 - (lily_count / (BOARD_N * BOARD_N))
@@ -441,10 +492,28 @@ class BitBoard:
         center_bonus = center_gain / BOARD_N  # normalize
 
         # 5) blocking penalty: if opponent can jump far from landing
-        temp = BitBoard(self.bitboard.copy())
+        temp = BitBoard()
+        temp.lilly_bits = self.lilly_bits
+        temp.frog_bits = self.frog_bits
+        temp.opp_bits = self.opp_bits
         temp.current_player = me
-        temp._set_cell(start_r, start_c, BitBoard.EMPTY)
-        temp._set_cell(end_r, end_c, me)
+
+        # Use bit operations to set cells efficiently
+        start_pos = start_r * BOARD_N + start_c
+        end_pos = end_r * BOARD_N + end_c
+
+        # Clear the start position
+        if me == self.FROG:
+            temp.frog_bits &= ~(1 << start_pos)
+        else:
+            temp.opp_bits &= ~(1 << start_pos)
+
+        # Set the end position
+        if me == self.FROG:
+            temp.frog_bits |= 1 << end_pos
+        else:
+            temp.opp_bits |= 1 << end_pos
+
         temp.toggle_player()
 
         opp_max = 0
@@ -530,7 +599,6 @@ class BitBoard:
 
     def evaluate_position(self):
         """Heuristic function that evaluates a position"""
-        return 0
         # Available ways to double jump
         current_player = self.current_player
         player_skips = 0
@@ -538,36 +606,40 @@ class BitBoard:
         players = [BitBoard.FROG, BitBoard.OPPONENT]
         opponent_player = [x for x in players if x != self.current_player].pop()
 
-        # Use bit operations to quickly find all pieces and calculate skip options
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                cell = self._get_cell(r, c)
-                if cell == current_player:
-                    location = Coord(r, c)
-                    player_skips += self.get_adjacent_leapfrog(location, current_player)
-                elif cell == opponent_player:
-                    location = Coord(r, c)
-                    opponent_skips += self.get_adjacent_leapfrog(
-                        location, opponent_player
-                    )
+        # Get positions for current player and opponent
+        current_player_positions = self.get_all_pos(current_player)
+        opponent_player_positions = self.get_all_pos(opponent_player)
+
+        # Calculate skip options
+        for pos in current_player_positions:
+            player_skips += self.get_adjacent_leapfrog(pos, current_player)
+
+        for pos in opponent_player_positions:
+            opponent_skips += self.get_adjacent_leapfrog(pos, opponent_player)
 
         skip_advantage = scaled_sigmoid(player_skips - opponent_skips, input_range=5)
 
-        # Calculate advancement level
+        # Calculate advancement level using bit operations
         score = 0
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                cell = self._get_cell(r, c)
-                if cell == self.current_player:
-                    if self.current_player == BitBoard.FROG:
-                        score += r
-                    else:
-                        score += BOARD_N - 1 - r
-                elif cell == opponent_player:
-                    if self.current_player == BitBoard.FROG:
-                        score -= BOARD_N - 1 - r
-                    else:
-                        score -= r
+
+        # For FROG player - score is higher for pieces further down the board
+        if self.current_player == BitBoard.FROG:
+            frog_pieces = self.get_all_pos(BitBoard.FROG)
+            for pos in frog_pieces:
+                score += pos.r
+
+            opponent_pieces = self.get_all_pos(BitBoard.OPPONENT)
+            for pos in opponent_pieces:
+                score -= BOARD_N - 1 - pos.r
+        else:
+            # For OPPONENT player - score is higher for pieces further up the board
+            opponent_pieces = self.get_all_pos(BitBoard.OPPONENT)
+            for pos in opponent_pieces:
+                score += BOARD_N - 1 - pos.r
+
+            frog_pieces = self.get_all_pos(BitBoard.FROG)
+            for pos in frog_pieces:
+                score -= pos.r
 
         score = scaled_sigmoid(score, input_range=10)
         cluster_score = self.clustering_score()
@@ -577,12 +649,8 @@ class BitBoard:
 
     def get_coordinates(self):
         """Get coordinates of all pieces for the current player"""
-        coordinates = []
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if self._get_cell(r, c) == self.current_player:
-                    coordinates.append((r, c))
-        return coordinates
+        coords = self.get_all_pos(self.current_player)
+        return [(coord.r, coord.c) for coord in coords]
 
     def clustering_score(self, ideal_dist=2, sigma=0.5):
         """Calculate how well the player's pieces are clustered"""
@@ -667,81 +735,10 @@ class BitBoard:
 
         # precompute heuristics per row
         compressions = self.get_all_compressions()
-        h = [self.jump_heuristic(r, compressions) for r in range(BOARD_N)]
+        # h = [self.jump_h
 
-        # priority queue holds (f, counter, coord, bitboard)
-        open_heap = []
-        # make a fresh copy of self for the root
-        root_bb = BitBoard(self.bitboard.copy())
-        root_bb.current_player = self.current_player
 
-        counter = itertools.count()
-
-        heapq.heappush(open_heap, (h[start.r], next(counter), start, root_bb))
-
-        came_from = {}
-        g_score = {start: 0}
-
-        while open_heap:
-            f, _, current, bb = heapq.heappop(open_heap)
-            if current.r == target:
-                return self.reconstruct_path(came_from, current)
-
-            # generate all hops *from this exact board*
-            for action, neighbor in bb.get_possible_move(current):
-                tentative_g = g_score[current] + 1
-                if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                    g_score[neighbor] = tentative_g
-                    came_from[neighbor] = (current, action)
-                    new_f = tentative_g + h[neighbor.r]
-
-                    # make the hopped board
-                    new_bb = bb.move(action, neighbor)
-                    # preserve player so forward stays consistent
-                    new_bb.current_player = bb.current_player
-
-                    heapq.heappush(open_heap, (new_f, next(counter), neighbor, new_bb))
-
-        return None
-
-    def a_star(self, coord):
-        """Legacy A* search function - keeping for compatibility"""
-        start = coord
-
-        # Finds all compressions for the board
-        compression_dict = self.get_all_compressions()
-
-        # Pre computes heuristic values
-        heuristic_dict = {}
-        for i in range(BOARD_N):
-            heuristic_dict[i] = self.jump_heuristic(i, compression_dict)
-
-        if start is None:
-            return None
-
-        closed_set = set()
-        came_from = {}
-        g_score = {start: 0}
-
-        open_heap = []
-        heapq.heappush(open_heap, (heuristic_dict[start.r], start))
-
-        while open_heap:
-            _, current = heapq.heappop(open_heap)
-
-            if current.r == BOARD_N - 1:
-                return self.reconstruct_path(came_from, current)
-
-            closed_set.add(current)
-            moves = self.get_possible_move(current)
-
-            for move, neighbor in moves:
-                if neighbor in closed_set:
-                    continue
-
-                # Save the current state
-                saved_bitboard = self.bitboard.copy()
-
-                # Create a temporary board with the move applied
-                tmp = BitBoard(saved_bitboard)
-                tmp.current
+def scaled_sigmoid(x, input_range=10, output_range=(0, 1)):
+    normalized = 1 / (1 + math.exp(-x * (2 / input_range)))
+    lo, hi = output_range
+    return lo + normalized * (hi - lo)
