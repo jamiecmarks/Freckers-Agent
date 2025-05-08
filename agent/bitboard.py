@@ -478,7 +478,7 @@ class BitBoard:
             ]  # Try to avoid GrowAction loops when near the end of the game
 
         possible_moves.append((GrowAction(), None))
-        return random.choices(possible_moves, k=1, weights=[4 / 5, 1 / 5])[0]
+        return random.choices(possible_moves, k=1)[0]
 
     def get_all_moves(self):
         """Get all possible moves for the current player"""

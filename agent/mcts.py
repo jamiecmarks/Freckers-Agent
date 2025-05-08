@@ -55,14 +55,14 @@ class MonteCarloTreeSearchNode(Strategy):
     AVG_LEN = 0.0
 
     # hyper‑params
-    C = 1.1
+    C = 0.5
     W_PROG = 0.4
     W_LAT = 0.4
     W_BACK = 5.0  # additional penalty for backwards moves
-    GROW_REQ = 3  # min extra hops a grow must unlock
+    GROW_REQ = 6  # min extra hops a grow must unlock
     PW_K = 4
     MAX_PLY = 150
-    MAX_ROLLOUT = 45
+    MAX_ROLLOUT = 70
 
     ROLLOUT_W_PROG = 15
     ROLLOUT_W_LAT = 4
@@ -98,26 +98,79 @@ class MonteCarloTreeSearchNode(Strategy):
         return self._score
 
     # ------------------------------------------------------------------
+    #
+    def _frog_spread(self):
+        # for RED, larger r = closer to goal; for BLUE vice versa
+        rows = [
+            r for r, c in self.state.get_all_pos(self.state.get_current_player())
+        ]  # all frog origins
+
+        return max(rows) - min(rows)
+
+    # def _ordered_moves(self) -> List[Tuple[MoveAction, Optional[Coord]]]:
+    #     moves = self.state.get_all_moves()
+    #     player = self.state.get_current_player()
+    #     mid = (BOARD_N - 1) // 2
+    #     base_hops = self.state.hop_count()
+    #     base_spread = self._frog_spread()
+    #
+    #     scored: List[Tuple[MoveAction, Optional[Coord], float]] = []
+    #     for mv, res in moves:
+    #         if res is None:
+    #             # your existing grow logic…
+    #             score = 50 * (self.state.move(mv, res).hop_count() - base_hops)
+    #         else:
+    #             # forward / lateral as before
+    #             prog = _row_prog(player, mv.coord.r, res.r)
+    #             lat = abs(res.c - mid)
+    #             if prog < 0:
+    #                 score = -10_000 - self.W_BACK * abs(prog)
+    #             else:
+    #                 score = 1_000 * prog - 50 * lat
+    #
+    #             # now add cohesion bonus:
+    #             # simulate the hop, compute new spread
+    #             tmp = self.state.move(mv, res)
+    #             tmp.toggle_player()
+    #             new_spread = MonteCarloTreeSearchNode(tmp)._frog_spread()
+    #             spread_delta = new_spread - base_spread
+    #             cohesion_bonus = -200.0 * spread_delta
+    #             score += cohesion_bonus
+    #
+    #         scored.append((mv, res, score))
+    #
+    #     # sort by the combined score
+    #     scored.sort(key=lambda x: x[2], reverse=True)
+    #     # drop the scores
+    #     return [(mv, res) for mv, res, _ in scored]
+
     def _ordered_moves(self):
         moves = self.state.get_all_moves()
         player = self.state.get_current_player()
         mid = (BOARD_N - 1) // 2
-        base_hops = self.state.hop_count()
+
+        base_hops = len(moves) - 1  # exclude grow
 
         def score(item):
             mv, res = item
             if res is None:
                 # quick grow benefit estimate
-                after = self.state.move(mv, res).hop_count()
+                after = len(self.state.move(mv, res).get_all_moves()) - 1
                 gain = after - base_hops
-                return -1_000 if gain < self.GROW_REQ else 50 * gain
+                if gain < self.GROW_REQ:
+                    return -10_000
+                return 50 * gain
             prog = _row_prog(player, mv.coord.r, res.r)
             lat = abs(res.c - mid)
             if prog < 0:
                 return -10_000 - self.W_BACK * abs(prog)  # forbid backward
             return 1_000 * prog - 50 * lat
 
-        moves.sort(key=score, reverse=True)
+        # always put grow first because it is a special case that has important consequences
+        # temp = moves[:-1]
+        # temp.sort(key=lambda x: score(x), reverse=True)
+        moves.sort(key=lambda x: score(x), reverse=True)
+        # moves = moves[-1:] + temp
         return moves
 
     # ------------------------------------------------------------------
@@ -131,13 +184,29 @@ class MonteCarloTreeSearchNode(Strategy):
 
     def _bias(self, mv, res):
         if res is None:
-            return -1.0  # already filtered weak grows, still downweight
+            tmp = self.state.move(mv, res)
+            gain = -1 * (len(self.state.get_all_moves()) - len(tmp.get_all_moves()))
+
+            return 0.02 * gain if gain and self.depth > 2 and self.depth < 40 else -2
+
         p = self.state.get_current_player()
+        # get a cohesion bonus, you want frogs to be close together
+
+        rows = [r for r, c in self.state.get_all_pos(p)]
+        spread_old = max(rows) - min(rows)
+        rows.remove(mv.coord.r)
+        rows.append(res.r)
+        spread_new = max(rows) - min(rows)
+
+        # we want a negative spread delta
+        spread_delta = spread_new - spread_old
+
         prog = _row_prog(p, mv.coord.r, res.r)
         lat = abs(res.c - (BOARD_N - 1) // 2)
         if prog < 0:
             return -self.W_BACK * abs(prog)
-        return self.W_PROG * prog - self.W_LAT * lat
+
+        return self.W_PROG * prog - self.W_LAT * lat - 0.2 * spread_delta
 
     def _uct(self, child):
         exploit = child.q() / (child.n() + 1e-9)
@@ -161,6 +230,7 @@ class MonteCarloTreeSearchNode(Strategy):
     # ------------------------------------------------------------------
     @staticmethod
     def _rollout_move(state: BitBoard):
+        return state.get_random_move()
         moves = state.get_all_moves()
         player = state.get_current_player()
         mid = (BOARD_N - 1) // 2
@@ -184,15 +254,19 @@ class MonteCarloTreeSearchNode(Strategy):
         bb = BitBoard(np.copy(self.state.get_board()))
         bb.current_player = self.state.current_player
         amaf = set()
+
         depth = 0
         for depth in range(self.MAX_ROLLOUT):
             if bb.is_game_over():
                 break
+
             mv, res = self._rollout_move(bb)
             if res is not None and bb.get_current_player() == self.root_player:
                 amaf.add(_action_key(mv, res))
             bb = bb.move(mv, res, in_place=True)
+
             bb.toggle_player()
+
         # evaluate
         if bb.is_game_over():
             f, o = bb.frog_border_count.values()
