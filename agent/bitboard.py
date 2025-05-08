@@ -3,14 +3,11 @@ from referee.game.actions import MoveAction, GrowAction
 from referee.game.coord import Coord, Direction
 from referee.game.constants import BOARD_N
 import math
-import heapq
-import itertools
 import random
-from functools import lru_cache
 
 
 class BitBoard:
-    # Cell type constants - kept for interface compatibility
+    # Cell type constants
     EMPTY = 0b00
     LILLY = 0b01
     FROG = 0b10
@@ -28,6 +25,7 @@ class BitBoard:
     _OFFSETS = [(d.value.r, d.value.c, d) for d in Direction]
 
     # Precompute row masks for common operations
+    # this allows us to get any row in O(1) time
     _ROW_MASKS = [0] * BOARD_N
     for r in range(BOARD_N):
         mask = 0
@@ -38,12 +36,13 @@ class BitBoard:
     def __init__(self, board=None):
         # Initialize three 64-bit integers to represent the entire board
         # Each bit corresponds to one cell, with bit position = r*BOARD_N + c
+
         self.lilly_bits = 0  # Bits for lily pads
         self.frog_bits = 0  # Bits for frog pieces
         self.opp_bits = 0  # Bits for opponent pieces
 
         if board is None:
-            # Initialize a fresh bitboard
+            # Initialize a fresh bitboard according to game spec
             self._create_start_bitboard()
         elif isinstance(board, np.ndarray):
             # Convert numpy array to bitboard
@@ -54,7 +53,7 @@ class BitBoard:
             self.frog_bits = board[1]
             self.opp_bits = board[2]
 
-        self.current_player = self.FROG
+        self.current_player = self.FROG  # default current player
         self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
         self.ply_count = 0
 

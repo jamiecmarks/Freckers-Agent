@@ -228,10 +228,22 @@ class MonteCarloTreeSearchNode(Strategy):
         rem = self.time_budget - safety_margin
         assert rem > 0
         move_no = min(self.state.get_ply_count() // 2, self.MAX_PLY // 2)
+        if MonteCarloTreeSearchNode.AVG_LEN:
+            move_no = (
+                move_no * self.MAX_PLY / math.ceil(self.AVG_LEN / 2)
+            )  # convert our move_no to be relative to the average depth we see in sims, try to squeeze out as much time as possible
         geo = decay**move_no - decay ** (self.MAX_PLY // 2)
         slice_t = rem * (1 - decay) * decay**move_no / geo
         deadline = t0 + slice_t
         sims = 0
+        # t0 = time.perf_counter()
+        # rem = self.time_budget - safety_margin
+        # assert rem > 0
+        # move_no = min(self.state.get_ply_count() // 2, self.MAX_PLY // 2)
+        # geo = decay**move_no - decay ** (self.MAX_PLY // 2)
+        # slice_t = rem * (1 - decay) * decay**move_no / geo
+        # deadline = t0 + slice_t
+        # sims = 0
         while time.perf_counter() < deadline:
             leaf = self._tree_policy()
             res, amaf = leaf._simulate()
