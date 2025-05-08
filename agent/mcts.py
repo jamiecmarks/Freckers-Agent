@@ -1,17 +1,3 @@
-"""freckers_mcts.py – Re‑revised MCTS agent.
-
-Major fixes after reviewing full game log:
-• **No backward hops.** Any move that retreats gets a massive negative bias.
-• Stronger lateral penalty (`W_LAT`  → 0.4).
-• Grow moves allowed *only* when they unlock ≥ 3 extra hop moves – estimated
-  cheaply via `state.hop_count()` helper (added below).
-• Tree policy and roll‑out share identical forward‑only logic, ensuring
-  simulations reflect our strategic intent.
-• Losses back‑propagated correctly (kept from last patch).
-
-Plug‑and‑play: same public interface.
-"""
-
 from __future__ import annotations
 
 import math
@@ -55,7 +41,7 @@ class MonteCarloTreeSearchNode(Strategy):
     AVG_LEN = 0.0
 
     # hyper‑params
-    C = 0.5
+    C = 0.4
     W_PROG = 0.4
     W_LAT = 0.4
     W_BACK = 5.0  # additional penalty for backwards moves
@@ -212,6 +198,16 @@ class MonteCarloTreeSearchNode(Strategy):
         exploit = child.q() / (child.n() + 1e-9)
         bias = self._bias(*child.parent_action)
         explore = self.C * math.sqrt(math.log(self.n() + 1) / (child.n() + 1e-9))
+
+        # Consider adding a progressive bias that decreases with visits
+        prog_bias = bias / (np.log(1 + child.n()) + 1)  # cube root
+
+        return exploit + prog_bias + explore
+
+    def old_uct(self, child):
+        exploit = child.q() / (child.n() + 1e-9)
+        bias = self._bias(*child.parent_action)
+        explore = self.C * math.sqrt(math.log(self.n() + 1) / (child.n() + 1e-9))
         return exploit + bias + explore
 
     def _select(self):
@@ -230,17 +226,27 @@ class MonteCarloTreeSearchNode(Strategy):
     # ------------------------------------------------------------------
     @staticmethod
     def _rollout_move(state: BitBoard):
-        return state.get_random_move()
         moves = state.get_all_moves()
         player = state.get_current_player()
         mid = (BOARD_N - 1) // 2
+
+        # Epsilon-greedy approach
+        if random.random() < 0.1:  # 10% random exploration
+            return state.get_random_move()
+
         best_val, best = -1e9, None
         for mv, res in moves:
             if res is None:
-                continue  # never grow in rollout
+                # Maybe consider grows occasionally in rollout?
+                if random.random() < 0.05 and state.hop_count() < 8:
+                    val = 5  # Small chance to grow when fewer hops available
+                    if val > best_val:
+                        best_val, best = val, (mv, res)
+                continue
+
             prog = _row_prog(player, mv.coord.r, res.r)
             if prog < 0:
-                continue  # skip backwards
+                continue  # Skip backwards
             lat = abs(res.c - mid)
             val = (
                 MonteCarloTreeSearchNode.ROLLOUT_W_PROG * prog
@@ -248,7 +254,8 @@ class MonteCarloTreeSearchNode(Strategy):
             )
             if val > best_val:
                 best_val, best = val, (mv, res)
-        return best if best else random.choice(moves)  # fallback
+
+        return best if best else random.choice(moves)  # Fallback
 
     def _simulate(self):
         bb = BitBoard(np.copy(self.state.get_board()))
