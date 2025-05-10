@@ -6,7 +6,7 @@ from tqdm import tqdm
 python_path = sys.executable
 
 # Step 2: Define the number of games to run
-n = 10  # Change this as needed
+n = 10000  # Change this as needed
 
 # Step 3: Reset results.txt to "0"
 with open("results.txt", "w") as f:
@@ -14,21 +14,29 @@ with open("results.txt", "w") as f:
 
 # Step 4: Run the games with live win stats and a progress bar
 with tqdm(total=n, desc="Running Games", ncols=100) as pbar:
+    total_wins = 0
     for i in range(1, n + 1):
-        subprocess.run(
-            [python_path, "-m", "referee", "agent", "randomagent"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
+        if i%2 == 0:
+            subprocess.run(
+                [python_path, "-m", "referee", "agent", "agent2"],
+                stdout = subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        else:
+            subprocess.run(
+                [python_path, "-m", "referee", "agent2", "agent"],
+                stdout = subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+    
 
         # Read current win count
-        with open("results.txt", "r") as f:
-            try:
-                current_wins = int(f.read().strip())
-            except ValueError:
-                current_wins = 0
+        with open("eval.txt", "r") as f:
+            output = float(f.read())
+            if output > 0:
+                total_wins +=1
+
 
         # Update progress bar and win stats
-        pbar.set_postfix(wins=f"{current_wins}/{i}")
+        pbar.set_postfix(wins=f"{total_wins}/{i}")
         pbar.update(1)
 
 # Step 5: Final win rate

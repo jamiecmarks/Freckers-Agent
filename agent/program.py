@@ -83,6 +83,7 @@ class Agent:
             new_board = self.root.state.move(action)
             new_board.toggle_player()
             child = MinimaxSearchNode(new_board)
+            child.history = self.root.history
 
         child.time_budget = referee["time_remaining"]
 

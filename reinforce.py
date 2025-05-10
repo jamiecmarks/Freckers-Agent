@@ -24,47 +24,34 @@ class WeightNet(nn.Module):
 
 class AdvantageTracker:
     def __init__(self, n):
-        # Arrays to store the advantage scores for each feature
-        self.advantage_arrays = {
-            'distance': [0.4, 0.4],
-            'centrality': [0.1, 0.1],
-            'mobility': [0.1, 0.1],
-            'double_jumps': [0.1, 0.1]
-        }
-        self.max_window = 10  # Rolling window size for mean and std
-
-        
-        # Track count of entries for sample mean and std calculations
+        self.sum = np.zeros(n)
+        self.sum_sq = np.zeros(n)
+        self.delta_sum = np.zeros(n)
+        self.delta_sum_sq = np.zeros(n)
         self.count = 0
 
-    def update(self, adv, feature_name):
-        # Store the advantage value for the specified feature
-        self.advantage_arrays[feature_name].append(adv)
+    def update(self, adv, delta):
+        adv = np.clip(adv, -10, 10)
+        delta = np.clip(delta, -10, 10)
+        self.sum += adv
+        self.sum_sq += adv**2
+        self.delta_sum += delta
+        self.delta_sum_sq += delta**2
         self.count += 1
 
-    def sample_mean(self, feature_name):
-        # Calculate sample mean for the feature
-        if not self.advantage_arrays[feature_name]:
-            return 0.0
-        # Use only the last 10 values (or all if fewer than 10)
-        window = self.advantage_arrays[feature_name][-self.max_window:] if len(self.advantage_arrays[feature_name]) > self.max_window else self.advantage_arrays[feature_name]
-        return np.mean(window)
+    def mean(self):
+        return self.sum / (self.count + 1e-8)
 
-    def sample_std(self, feature_name):
-        # Calculate sample standard deviation for the feature
-        data = np.array(self.advantage_arrays[feature_name])
-        return np.std(data, ddof=1)  # Sample standard deviation (ddof=1)
+    def std(self):
+        m = self.mean()
+        return np.sqrt(self.sum_sq/(self.count+1e-8) - m**2 + 1e-8)
 
-    def z_score(self, adv, feature_name):
-        # Calculate the z-score for the advantage value based on sample mean and std
-        mean = self.sample_mean(feature_name)
-        std = self.sample_std(feature_name)
-        
-        # Return the z-score: (x - mean) / std
-        if std == 0:
-            return 0  # If std is zero (no variance), return 0 (no deviation)
-        return (adv - mean) / std
+    def delta_mean(self):
+        return self.delta_sum/(self.count+1e-8)
 
+    def delta_std(self):
+        m = self.delta_mean()
+        return np.sqrt(self.delta_sum_sq/(self.count+1e-8) - m**2 + 1e-8)
 
 def write_weights(path, weights):
     d = {"centrality": float(weights[0]),
@@ -121,8 +108,6 @@ def plot_metrics(history):
         plt.savefig('win_rates.png')
         plt.close()
 
-
-
 def evaluate_baseline(model, n_games=10):
     baseline = np.array([0.25]*4)
     w = model().detach().numpy()
@@ -138,7 +123,6 @@ def evaluate_baseline(model, n_games=10):
             else: draws+=1
         except: draws+=1
     return wins/n_games, losses/n_games, draws/n_games
-
 
 def train(n_games=1000):
     model_red  = WeightNet(seed=random.randint(0,10000))
@@ -181,51 +165,43 @@ def train(n_games=1000):
         if score>0: wins+=1
         elif score<0: losses+=1
         else: draws+=1
-    
-        # Figures out heuristic contributions
-        # --- Feature calculations ---
-        F_red = np.loadtxt("red_pv_features.csv", delimiter=",", skiprows=1)
-        mean_red = np.mean(F_red[:, 1:], axis=0)  # Mean of each feature (excluding frame index)
 
-        F_blue = np.loadtxt("blue_pv_features.csv", delimiter=",", skiprows=1)
-        mean_blue = np.mean(F_blue[:, 1:], axis=0)
+        # compute feature deltas
+        F_red  = np.loadtxt('red_pv_features.csv',  delimiter=',', skiprows=1)
+        delta_red = np.sum(np.abs(np.diff(F_red,axis=0)),axis=0)[1:]
+        z_red = ((delta_red - tracker_red.delta_mean()) / (tracker_red.delta_std()+1e-8)
+                 if tracker_red.count>0 else delta_red/ (np.sum(np.abs(delta_red))+1e-8))
+        z_red = z_red / (np.sum(w_red) + 1e-8)
+        adv_red = z_red * score_sma
+        tracker_red.update(adv_red, delta_red)
 
-        # Print out the features for both red and blue
+        F_blue = np.loadtxt('blue_pv_features.csv', delimiter=',', skiprows=1)
+        delta_blue = np.sum(np.abs(np.diff(F_blue,axis=0)),axis=0)[1:]
+        z_blue = ((delta_blue - tracker_blue.delta_mean()) / (tracker_blue.delta_std()+1e-8)
+                  if tracker_blue.count>0 else delta_blue/(np.sum(np.abs(delta_blue))+1e-8))
+
+        z_blue = z_blue / (np.sum(w_blue) + 1e-8)
+        adv_blue = z_blue * (score_sma) # Modified to fix inverse issue?
+        tracker_blue.update(adv_blue, delta_blue)
+            
+
 
         winner = "red" if score > 0 else "blue" if score < 0 else "draw"
-        print(f"\nGame {i} Feature Calculations:")
-
-        print("Winner is: ", winner)
-
-        print("\nRed Agent Features:")
-        adv_red = []
-
-        for feature_name, feature_value in zip(['centrality', 'double_jumps', 'distance', 'mobility'], mean_red):
-            print(f"  {feature_name}: {feature_value:.4f}")
-            z_score_red = tracker_red.z_score(feature_value, feature_name)
-            print(f"    Z-score: {z_score_red:.4f}")
-            advantage_red = feature_value * score_sma
-            adv_red.append(advantage_red)
-
-            print(f"    Advantage (z-score * SMA): {advantage_red:.4f}")
-            tracker_red.update(feature_value, feature_name)
 
 
-        adv_blue = []
-        print("\nBlue Agent Features:")
-        for feature_name, feature_value in zip(['centrality', 'double_jumps', 'distance', 'mobility'], mean_blue):
-            print(f"  {feature_name}: {feature_value:.4f}")
-            z_score_blue = tracker_blue.z_score(feature_value, feature_name)
-            print(f"    Z-score: {z_score_blue:.4f}")
-            advantage_blue = feature_value * (score_sma)  # Blue agent's advantage is inverted
-            adv_blue.append(advantage_blue)
-            print(f"    Advantage (z-score * -SMA): {advantage_blue:.4f}")
-            tracker_blue.update(feature_value, feature_name)
-
-
-
-
-            # --- UPDATED LOSS BLOCK ---
+        print(f"game {i} : winner - {winner}")
+        print("RED metrics")
+        print(f"advantage vector: centrality = {delta_red[0]*score_sma:>8.4f}, double_jumps = {delta_red[1]*score_sma:>8.4f}, distance = {delta_red[2]*score_sma:>8.4f}, mobility = {delta_red[3]*score_sma:>8.4f}")
+        print(f"normalised advantage vector: centrality = {adv_red[0]:>8.4f}, double_jumps = {adv_red[1]:>8.4f}, distance = {adv_red[2]:>8.4f}, mobility = {adv_red[3]:>8.4f}")
+        print(f"feature weights: centrality = {w_red[0]:>8.4f}, double_jumps = {w_red[1]:>8.4f}, distance = {w_red[2]:>8.4f}, mobility = {w_red[3]:>8.4f}")
+        print()
+        # Print requested metrics for blue agent
+        print("BLUE metrics")
+        print(f"advantage vector: centrality = {delta_blue[0]*score_sma:>8.4f}, double_jumps = {delta_blue[1]*score_sma:>8.4f}, distance = {delta_blue[2]*score_sma:>8.4f}, mobility = {delta_blue[3]*score_sma:>8.4f}")
+        print(f"normalised advantage vector: centrality = {adv_blue[0]:>8.4f}, double_jumps = {adv_blue[1]:>8.4f}, distance = {adv_blue[2]:>8.4f}, mobility = {adv_blue[3]:>8.4f}")
+        print(f"feature weights: centrality = {w_blue[0]:>8.4f}, double_jumps = {w_blue[1]:>8.4f}, distance = {w_blue[2]:>8.4f}, mobility = {w_blue[3]:>8.4f}")
+        print()
+        # --- UPDATED LOSS BLOCK ---
         adv_t_red  = torch.tensor(adv_red,  dtype=torch.float32)
         adv_t_blue = torch.tensor(adv_blue, dtype=torch.float32)
         w_r = model_red()
@@ -263,7 +239,6 @@ def train(n_games=1000):
     torch.save(model_blue.state_dict(),'model_blue.pth')
     plot_metrics(history)
     pd.DataFrame(history).to_csv('training_metrics.csv', index=False)
-    print("Training complete.")
 
 if __name__ == "__main__":
     n=int(sys.argv[1]) if len(sys.argv)>1 else 1000

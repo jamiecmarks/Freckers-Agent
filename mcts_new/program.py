@@ -10,8 +10,7 @@ from referee.game.constants import MAX_TURNS
 from .random_strat import RandomStrat
 import cProfile
 import pstats
-from .minimax import MinimaxSearchNode
-import os
+
 
 class Agent:
     """
@@ -25,18 +24,12 @@ class Agent:
         Any setup and/or precomputation should be done here.
         """
         self._color = color
-        print("I am a minimax agent")
-        with open("blue_pv_features.csv", "w") as pf:
-            print("Writing new file")
-            pf.write("move,centrality,double,distance,mobility\n")
+        print("I am an mcts agent")
 
         self.total_moves = 0
         bitboard = BitBoard()
-        self.root = MinimaxSearchNode(bitboard)
-        if os.path.exists("bitboards_logged.flag"):
-            os.remove("bitboards_logged.flag")
 
-
+        self.root = MonteCarloTreeSearchNode(bitboard)
 
     def action(self, **referee: dict) -> Action:
         """
@@ -83,8 +76,7 @@ class Agent:
             # create a new child node
             new_board = self.root.state.move(action)
             new_board.toggle_player()
-            child = MinimaxSearchNode(new_board)
-            child.history = self.root.history
+            child = MonteCarloTreeSearchNode(new_board)
 
         child.time_budget = referee["time_remaining"]
 

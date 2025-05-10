@@ -1,19 +1,21 @@
+
+
 import numpy as np
 from referee.game.actions import MoveAction, GrowAction
 from referee.game.coord import Coord, Direction
 from referee.game.constants import BOARD_N
 import math
-import numpy as np
-import heapq
-import itertools
+import random
 
 
 class BitBoard:
-    LILLY = 0b01
-    FROG = 0b10
+    # Cell type constants
     EMPTY = 0b00
-    OPPONENT = 0b11
+    LILLY = 0b01
+    RED = 0b10
+    BLUE = 0b11
 
+    # Direction constants
     DOWN = 1
     UP = -1
     LEFT = -1
@@ -21,59 +23,233 @@ class BitBoard:
     SAME = 0
 
     # Precompute (dr, dc) and Direction enum pairs once at import
-    _OFFSETS: list[tuple[int, int, Direction]] = [
-        (d.value.r, d.value.c, d) for d in Direction
-    ]
+    # Avoid expensive Direction enum access during move generation
+    _OFFSETS = [(d.value.r, d.value.c, d) for d in Direction]
+
+    # Precompute row masks for common operations
+    # this allows us to get any row in O(1) time
+    _ROW_MASKS = [np.uint64(0)] * BOARD_N
+    for r in range(BOARD_N):
+        mask = np.uint64(0)
+        for c in range(BOARD_N):
+            mask |= np.uint64(1 << (r * BOARD_N + c))
+        _ROW_MASKS[r] = mask
+
+    _ALL_CELLS_MASK = np.uint64((1 << (BOARD_N * BOARD_N)) - 1)
+
+
+    _COL_MASKS = [np.uint64(0)] * BOARD_N
+    for c in range(BOARD_N):
+        mask = np.uint64(0)
+        for r in range(BOARD_N):
+            mask |= np.uint64(1 << (r * BOARD_N + c))
+        _COL_MASKS[c] = mask
+
 
     def __init__(self, board=None):
+        # Initialize three 64-bit integers to represent the entire board
+        # Each bit corresponds to one cell, with bit position = r*BOARD_N + c
+        self.lilly_bits = np.uint64(0)  # Bits for lily pads
+        self.frog_bits = np.uint64(0)  # Bits for frog pieces
+        self.opp_bits = np.uint64(0)  # Bits for opponent pieces
+
         if board is None:
-            board = self.get_start_board()
-        self.board = board
-        self.current_player = self.FROG
-        self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
+            # Initialize a fresh bitboard according to game spec
+            self._create_start_bitboard()
+        elif isinstance(board, np.ndarray):
+            # Convert numpy array to bitboard
+            self._convert_numpy_to_bitboard(board)
+        else:
+            # Assume it's already a bitboard as we know it
+            self.lilly_bits = board[0]
+            self.frog_bits = board[1]
+            self.opp_bits = board[2]
+
+        self.current_player = self.RED  # default current player
+        self.frog_border_count = {self.RED: 0, self.BLUE: 0}
         self.ply_count = 0
 
+
+        # Calculate occupied cells mask for faster move generation
+        self._update_occupied_mask()
+
+    def _update_occupied_mask(self):
+        """Updates the mask of all occupied cells"""
+        self.occupied_mask = np.uint64(
+            self.lilly_bits | self.frog_bits | self.opp_bits
+        )  # just the OR of all three gives the full picture
+
+    def _create_start_bitboard(self):
+        """Creates the starting bitboard configuration using bit operations, and the configuration outlined in the spec"""
+        # Start with empty boards
+        self.lilly_bits = np.uint64(0)
+        self.frog_bits = np.uint64(0)
+        self.opp_bits = np.uint64(0)
+
+        # Frog pieces
+        row_mask = 0
+        for c in range(1, BOARD_N - 1):  # Insert all the necessary frogs in row 0
+            row_mask |= 1 << c
+        self.frog_bits |= np.uint64(row_mask)  # Top row is at r=0
+
+        # Set bottom row (BLUE pieces)
+        bottom_row_idx = (BOARD_N - 1) * BOARD_N
+        self.opp_bits |= np.uint64(row_mask << bottom_row_idx)
+
+        # lilly pads in row 1 and BOARD_N - 2
+        self.lilly_bits |= np.uint64(row_mask << BOARD_N)  # Row 1
+        self.lilly_bits |= np.uint64(row_mask << ((BOARD_N - 2) * BOARD_N))  # Row BOARD_N - 2
+
+        # Corner lily pads
+        self.lilly_bits |= np.uint64(1)
+        self.lilly_bits |= np.uint64(1 << (BOARD_N - 1))  # Top right
+        self.lilly_bits |= np.uint64(1 << ((BOARD_N - 1) * BOARD_N)) # Bottom left
+        self.lilly_bits |= np.uint64(1 << (
+            (BOARD_N - 1) * BOARD_N + (BOARD_N - 1)
+        ))  # Bottom right
+
+        # Update occupied cells mask
+        self._update_occupied_mask()
+
+    def _convert_numpy_to_bitboard(self, np_board):
+        """Converts a given numpy 2-d array to our internal bitboard representation, used because the 2d array is much more human-readable"""
+        self.lilly_bits = 0
+        self.frog_bits = 0
+        self.opp_bits = 0
+
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                pos = r * BOARD_N + c
+                cell_value = np_board[r][c]
+
+                if cell_value == self.LILLY:
+                    self.lilly_bits |= 1 << pos
+                elif cell_value == self.RED:
+                    self.frog_bits |= 1 << pos
+                elif cell_value == self.BLUE:
+                    self.opp_bits |= 1 << pos
+
+        # Update occupied cells mask
+        self._update_occupied_mask()
+
+    def bitboard(self):
+        """Returns our internal representation of the bitboard"""
+        return [self.lilly_bits, self.frog_bits, self.opp_bits]
+
+    def _get_cell(self, r, c):
+        """Return the cell type [lilly, empty, frog or opponent] at (r, c) using bit operations"""
+        if not (0 <= r < BOARD_N and 0 <= c < BOARD_N):
+            return None
+
+        pos = r * BOARD_N + c
+        bit_pos = np.uint64(1 << pos)
+
+        if self.lilly_bits & bit_pos:
+            return self.LILLY
+        elif self.frog_bits & bit_pos:
+            return self.RED
+        elif self.opp_bits & bit_pos:
+            return self.BLUE
+        else:
+            return self.EMPTY
+
+    def _set_cell(self, r, c, value):
+        """Sets the cell at (r,c) to value: `value` using bit operations"""
+        if not (0 <= r < BOARD_N and 0 <= c < BOARD_N):
+            return
+
+        pos = r * BOARD_N + c
+        bit_pos = 1 << pos
+
+        # Clear the cell in all representations
+        mask = ~bit_pos  # bitwise NOT, flips the bits
+        self.lilly_bits &= mask
+        self.frog_bits &= mask
+        self.opp_bits &= mask
+
+        # Set the new value
+        if value == self.LILLY:
+            self.lilly_bits |= bit_pos
+        elif value == self.RED:
+            self.frog_bits |= bit_pos
+        elif value == self.BLUE:
+            self.opp_bits |= bit_pos
+
+        # Update occupied cells mask
+        self._update_occupied_mask()
+
     def get_ply_count(self):
+        """Ply count here is the number of turns played so far in the game"""
         return self.ply_count
 
     def get_board(self):
-        return self.board
+        """Returns the board as a 2D numpy array for compatibility"""
+        board = np.zeros((BOARD_N, BOARD_N), dtype=int)
+
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                pos = r * BOARD_N + c
+                bit_pos = np.uint64(1 << pos)
+
+                if self.lilly_bits & bit_pos:
+                    board[r][c] = self.LILLY
+                elif self.frog_bits & bit_pos:
+                    board[r][c] = self.RED
+                elif self.opp_bits & bit_pos:
+                    board[r][c] = self.BLUE
+
+        return board
 
     def get_current_player(self):
         return self.current_player
 
     def toggle_player(self):
-        self.current_player = (
-            self.OPPONENT if self.current_player == self.FROG else self.FROG
-        )
+        """Toggles player in place for this bitboard"""
+        self.current_player = self.BLUE if self.current_player == self.RED else self.RED
 
     def is_game_over(self):
-        self.frog_border_count = {self.FROG: 0, self.OPPONENT: 0}
-        for c in range(BOARD_N):
-            if self.board[BOARD_N - 1][c] == self.FROG:
-                self.frog_border_count[self.FROG] += 1
-            if self.board[0][c] == self.OPPONENT:
-                self.frog_border_count[self.OPPONENT] += 1
+        """Check if the game is over"""
+        self.frog_border_count = {self.RED: 0, self.BLUE: 0}
+
+        # Get bottom row mask
+        bottom_row_mask = self._ROW_MASKS[BOARD_N - 1]
+
+        # Count frogs in bottom row
+        frogs_in_bottom = bin(self.frog_bits & bottom_row_mask).count(
+            "1"
+        )  # how many 1s are there ?
+        self.frog_border_count[self.RED] = frogs_in_bottom  # frogs here means RED frogs
+
+        # Get top row mask
+        top_row_mask = self._ROW_MASKS[0]
+
+        # Count opponents in top row using bit operations
+        opps_in_top = bin(self.opp_bits & top_row_mask).count(
+            "1"
+        )  # blue frogs, all from pov of red for understanding
+        self.frog_border_count[self.BLUE] = opps_in_top
+
         return (
-            self.frog_border_count[self.FROG] == BOARD_N - 2
-            or self.frog_border_count[self.OPPONENT] == BOARD_N - 2
+            self.frog_border_count[self.RED] == BOARD_N - 2
+            or self.frog_border_count[self.BLUE] == BOARD_N - 2
         )
 
     def get_winner(self):
+        """Returns 1 if the current player won, -1 if the opponent won, and 0 if it's a draw"""
         if max(self.frog_border_count.values()) == BOARD_N - 2:
             if (
-                self.frog_border_count[self.FROG] == BOARD_N - 2
-                and self.frog_border_count[self.OPPONENT] != BOARD_N - 2
+                self.frog_border_count[self.RED] == BOARD_N - 2
+                and self.frog_border_count[self.BLUE] != BOARD_N - 2
             ):
-                if self.current_player == self.FROG:
+                if self.current_player == self.RED:
                     return 1
                 else:
                     return -1
             elif (
-                self.frog_border_count[self.OPPONENT] == BOARD_N - 2
-                and self.frog_border_count[self.FROG] != BOARD_N - 2
+                self.frog_border_count[self.BLUE] == BOARD_N - 2
+                and self.frog_border_count[self.RED] != BOARD_N - 2
             ):
-                if self.current_player == self.OPPONENT:
+                if self.current_player == self.BLUE:
                     return 1
                 else:
                     return -1
@@ -82,258 +258,443 @@ class BitBoard:
         return 0
 
     def move(self, action: MoveAction, res: Coord | None = None, in_place=False):
+        """Moves a piece according to the action described in the action object combined with an optiional result coordinate for quicker calculation"""
         if in_place:
-            board_copy = self.board
+            new_board = self
         else:
-            board_copy = np.copy(self.board)
-        fill = self.current_player
+            # Create a new BitBoard with the same state
+            new_board = BitBoard()
+            new_board.lilly_bits = self.lilly_bits
+            new_board.frog_bits = self.frog_bits
+            new_board.opp_bits = self.opp_bits
+            new_board._update_occupied_mask()  # Update the occupied mask
 
+        # Get the piece type to move
         if isinstance(action, MoveAction):
-            fill = self.board[action.coord.r][action.coord.c]
+            # Directly compute bit position without using _get_cell
+            start_pos = action.coord.r * BOARD_N + action.coord.c
+            start_bit = np.uint64(1 << start_pos)
+
+            # find out what type of piece we're working with here
+            if self.frog_bits & start_bit:
+                fill = self.RED
+            elif self.opp_bits & start_bit:
+                fill = self.BLUE
+            else:
+                fill = self.LILLY  # Fallback, should not happen
+        else:
+            fill = self.current_player
 
         if isinstance(action, GrowAction):
-            for pos in self.get_all_pos(fill):
-                for direction in Direction:
-                    next_c = pos.c + direction.c
-                    next_r = pos.r + direction.r
-                    if (
-                        0 <= next_c < BOARD_N
-                        and 0 <= next_r < BOARD_N
-                        and board_copy[next_r][next_c] == self.EMPTY
-                    ):
-                        board_copy[next_r][next_c] = self.LILLY
+            # Handle GrowAction using bit operations
+            pieces_to_check = (
+                self.frog_bits if self.current_player == self.RED else self.opp_bits
+            )  # assume grows happen from the perspective of the current player
+            empty_cells = (
+                ~self.occupied_mask
+            ) # get all unoccupied cells using bitwise NOT
+            empty = (~self.occupied_mask) & BitBoard._ALL_CELLS_MASK
+
+
+            # For each direction, shift the player pieces and get potential growth spots
+            growth_spots = np.uint64(0)
+            for dr, dc, _ in self._OFFSETS:
+                # Calculate shift amount based on direction
+                if dr == 0 and dc == 0:
+                    continue  # Skip no movement
+
+                shift_amt = dr * BOARD_N + dc
+                # 2) do the shift in uint64 space
+                if shift_amt > 0:
+                    shifted = pieces_to_check<< np.uint64(shift_amt)
+                else:
+                    shifted = pieces_to_check >> np.uint64(-shift_amt)
+
+                # 3) mask off any “wrapped” rows:
+
+                if dc > 0:
+                    shifted &= ~BitBoard._COL_MASKS[0]  # remove leftmost column
+                elif dc < 0:
+                    shifted &= ~BitBoard._COL_MASKS[BOARD_N - 1]  # remove rightmost column
+
+                # 4) only keep truly empty spots
+                growth_spots |= shifted & empty
+                ## Calculate potential growth spots (empty neighbors)
+                #if shift > 0:
+                #    shifted = np.uint64(pieces_to_check << shift)
+                #else:
+                #    shifted = np.uint64(pieces_to_check >> abs(shift))
+
+                # Mask to keep cells in bounds after shift
+                #if dc > 0:  # RIGHT shift - remove leftmost column
+                #    edge_mask = ~np.uint64(0)
+                #    for r in range(BOARD_N):
+                #        edge_mask &= ~(self._ALL_CELLS_MASK)
+                #    shifted &= edge_mask
+                #elif dc < 0:  # LEFT shift - remove rightmost column
+                #    edge_mask = ~np.uint64(0)
+                #    for r in range(BOARD_N):
+                #        edge_mask &= ~(self._ALL_CELLS_MASK)
+                #    shifted &= edge_mask
+
+                ## Add these spots to growth spots if they're empty
+                #growth_spots |= np.uint64(shifted & empty_cells)
+            growth_spots &= BitBoard._ALL_CELLS_MASK
+
+            # Set all growth spots to lily pads
+            new_board.lilly_bits |= growth_spots
+            new_board._update_occupied_mask()
+
         elif res is not None:
-            board_copy[action.coord.r][action.coord.c] = self.EMPTY
-            board_copy[res.r][res.c] = fill
+            # Handle move with specified result
+            # Get the bit positions
+            start_pos = action.coord.r * BOARD_N + action.coord.c
+            end_pos = res.r * BOARD_N + res.c
+            start_bit = np.uint64(1 << start_pos)
+            end_bit = np.uint64(1 << end_pos)
+
+            # Easy case, just move the piece leaving an empty spot
+            if fill == self.RED:
+                new_board.frog_bits &= ~start_bit
+                new_board.frog_bits |= end_bit
+            elif fill == self.BLUE:
+                new_board.opp_bits &= ~start_bit
+                new_board.opp_bits |= end_bit
+
+            # Make sure destination is not a lily pad anymore
+            new_board.lilly_bits &= ~end_bit
+            new_board._update_occupied_mask()
+
         else:
-            next_coord = action.coord
+            # Handle move with computed result
+            start_r, start_c = action.coord.r, action.coord.c
+            next_r, next_c = start_r, start_c
+
             for direction in action.directions:
+               # print("Direction is, ", direction)
+               # print("Board is: ", self.get_board())
+
+                dr, dc = direction.value.r, direction.value.c
                 found_move = False
                 while not found_move:
-                    next_coord = next_coord + direction
-                    if board_copy[next_coord.r][next_coord.c] == self.LILLY:
-                        found_move = True
-            board_copy[action.coord.r][action.coord.c] = self.EMPTY
-            board_copy[next_coord.r][next_coord.c] = fill
+                    next_r += dr
+                    next_c += dc
 
-        new_board = BitBoard(board_copy)
+                    # 1) STOP if we ever leave the board
+                    if not (0 <= next_r < BOARD_N and 0 <= next_c < BOARD_N):
+                        continue
+
+                    # 2) Safe uint64 mask
+                    idx = next_r * BOARD_N + next_c
+                    bit_pos = np.uint64(1) << np.uint64(idx)
+
+                    # 3) Check for lily and stop
+                    if self.lilly_bits & bit_pos:
+                        found_move = True
+
+            # We don't know where this frog ended up, so we go in all the directions greedily until we find the resultant position
+           # for direction in action.directions:
+           #     dr, dc = direction.value.r, direction.value.c
+           #     found_move = False
+           #     while not found_move:
+           #         next_r += dr
+           #         next_c += dc
+           #         pos = next_r * BOARD_N + next_c
+           #         bit_pos = np.uint64(1 << pos)
+
+           #         if self.lilly_bits & bit_pos:
+           #             found_move = True
+
+            # Apply the move
+            start_pos = np.uint64(start_r * BOARD_N + start_c)
+            end_pos = np.uint64(next_r * BOARD_N + next_c)
+            start_bit = np.uint64(np.uint64(1) << start_pos)
+            end_bit = np.uint64(np.uint64(1) << end_pos)
+
+            # Clear start position
+            if fill == self.RED:
+                new_board.frog_bits &= ~start_bit
+                new_board.frog_bits |= end_bit
+            elif fill == self.BLUE:
+                new_board.opp_bits &= ~start_bit
+                new_board.opp_bits |= end_bit
+
+            new_board.lilly_bits &= ~end_bit
+            new_board._update_occupied_mask()
+
         new_board.current_player = self.current_player
         new_board.ply_count = self.ply_count + 1
         return new_board
 
     def get_all_pos(self, pos_type):
+        """Find all positions of a given piece type using bit operations"""
         out = []
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if self.board[r][c] == pos_type:
-                    out.append(Coord(r, c))
+
+        # Choose the correct bitboard based on piece type
+        if pos_type == self.LILLY:
+            bits = self.lilly_bits
+        elif pos_type == self.RED:
+            bits = self.frog_bits
+        elif pos_type == self.BLUE:
+            bits = self.opp_bits
+        else:
+            return out  # Empty not tracked directly
+
+        # Directly iterate over set bits for better performance
+        temp_bits = bits
+        while temp_bits:
+            # Extract least significant 1-bit
+            lsb = temp_bits & -temp_bits
+            # Calculate position index using fast bit counting
+            pos_idx = lsb.bit_length() - 1
+            # Convert to row, col
+            r, c = pos_idx // BOARD_N, pos_idx % BOARD_N
+            out.append(Coord(r, c))
+            # Clear the bit
+            temp_bits &= ~lsb
+
         return out
 
-    def get_all_moves(self):
-        possible_moves = []
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if self.board[r][c] == self.current_player:
-                    coord = Coord(r, c)
-                    moves = self.get_possible_move(coord)
-                    # print(coord)
-                    # for move, res in moves:
-                    #     print(move, res)
-                    possible_moves.extend(moves)
-
-        # GrowAction always an option
-        possible_moves.append((GrowAction(), None))
-        # cache the base list, but return a copy to callers
-        return possible_moves.copy()
-
     def get_start_board(self):
-        board = np.full((BOARD_N, BOARD_N), self.EMPTY, dtype=int)
-        for r in [0, BOARD_N - 1]:
-            for c in range(1, BOARD_N - 1):
-                board[r][c] = self.FROG if r == 0 else self.OPPONENT
-        for r in [1]:
-            opp_r = BOARD_N - 1 - r
-            for c in range(1, BOARD_N - 1):
-                if board[r][c] == self.EMPTY:
-                    board[r][c] = self.LILLY
-                    board[opp_r][c] = self.LILLY
-        for r in [0]:
-            for c in [0, BOARD_N - 1]:
-                board[r][c] = self.LILLY
-                board[BOARD_N - 1 - r][c] = self.LILLY
-        return board
+        """Returns the starting board as a numpy array for compatibility"""
+        # Create a temporary board with start position
+        temp_board = BitBoard()
+        temp_board._create_start_bitboard()
+        return temp_board.get_board()
 
-    # def get_possible_move(self, coord: Coord):
-    #     visited = set()
-    #     return self.get_possible_move_rec(coord, visited)
-
-
-
-
-
-    def get_possible_move(self, coord: Coord) -> list[tuple[MoveAction, Coord]]:
+    @staticmethod
+    def _cached_moves(board_bytes: bytes, player: int, dtype_str: str):
         """
-        Move-generation using primitive ints and per-path visited sets to avoid shared-state bugs.
+        Reconstruct a bitboard from its raw bytes + player, then
+        call the function to get uncached moves
         """
-        possible_moves: list[tuple[MoveAction, Coord]] = []
-        forward = 1 if self.current_player == self.FROG else -1
+        # Rebuild the numpy array in the right dtype & shape:
+        arr = np.frombuffer(board_bytes, dtype=np.dtype(dtype_str)).copy()
+        arr = arr.reshape((BOARD_N, BOARD_N))
+
+        bb = BitBoard(arr)
+        bb.current_player = player
+        return bb._all_moves_uncached()
+
+    def _all_moves_uncached(self):
+        """Get all possible moves using iterative logic"""
+        possible_moves = []
+
+        # Use bit operations to efficiently find all pieces of current player
+        player_positions = self.get_all_pos(self.current_player)
+
+        for pos in player_positions:
+            possible_moves.extend(self.get_possible_move(pos))
+
+        # GrowAction is always possible
+        possible_moves.append((GrowAction(), None))
+        return possible_moves
+
+    def get_random_move(self):
+        """Get a random valid move lazily, for efficiency"""
+        # Get current player's pieces efficiently
+        if self.current_player == self.RED:
+            player_bits = self.frog_bits
+            forbidden_row = BOARD_N - 1
+        else:
+            player_bits = self.opp_bits
+            forbidden_row = 0
+
+        # Convert to positions list
+        all_pos = []
+        temp_bits = player_bits
+        while temp_bits:
+            lsb = temp_bits & -temp_bits
+            pos_idx = lsb.bit_length() - 1
+            r, c = pos_idx // BOARD_N, pos_idx % BOARD_N
+            if r != forbidden_row:  # Skip positions in forbidden row
+                all_pos.append(Coord(r, c))
+            temp_bits &= ~lsb
+
+        random.shuffle(all_pos)
+
+        # Find the first position with at least one possible move
+        while all_pos:
+            rand_pos = all_pos.pop()
+            possible_moves = self.get_possible_move(rand_pos, lazy_ret=True)
+            if possible_moves:
+                break
+        else:
+            # No moves found, return GrowAction
+            return (GrowAction(), None)
+
+        # Add GrowAction and choose randomly
+        if rand_pos.r == forbidden_row:
+            return possible_moves[
+                0
+            ]  # Try to avoid GrowAction loops when near the end of the game
+
+        possible_moves.append((GrowAction(), None))
+        return random.choices(possible_moves, k=1)[0]
+
+    def get_all_moves(self):
+        """Get all possible moves for the current player"""
+        board_np = self.get_board()
+        bts = board_np.tobytes()
+
+        moves = BitBoard._cached_moves(bts, self.current_player, board_np.dtype.str)
+        return moves.copy()
+
+    def get_possible_move(
+        self, coord: Coord, lazy_ret=False
+    ) -> list[tuple[MoveAction, Coord]]:
+        """
+        Iterative move generation using a stack-based approach. If lazy_ret = True we just return the first move we come across for efficiency
+        """
+        possible_moves = []
+        forward = 1 if self.current_player == self.RED else -1
 
         start_r, start_c = coord.r, coord.c
-        # Each stack frame: (r, c, path_dirs, visited_set, in_jump)
-        stack: list[tuple[int, int, list[Direction], set[tuple[int, int]], bool]] = [
-            (start_r, start_c, [], {(start_r, start_c)}, False)
-        ]
 
-        # Localize attributes for speed
-        board = self.board
-        is_valid = self.is_valid_move
-        F, O = self.FROG, self.OPPONENT
-        N = BOARD_N
+        stack = [(start_r, start_c, [], {(start_r, start_c)}, False)]
+
+        # Pre-shuffle offsets for random first move
+        if lazy_ret:
+            offsets = list(self._OFFSETS)
+            random.shuffle(offsets)
+        else:
+            offsets = self._OFFSETS
 
         while stack:
             r, c, path_dirs, visited, in_jump = stack.pop()
-            for dr, dc, direction in self._OFFSETS:
+
+            for dr, dc, direction in offsets:
                 # Single-step (only if not already jumping)
                 if not in_jump:
-                    move = MoveAction(Coord(r, c), [direction])
-                    if is_valid(move, forward):
-                        dest_r, dest_c = r + dr, c + dc
-                        possible_moves.append((move, Coord(dest_r, dest_c)))
+                    # Directly check validity instead of calling is_valid_move
+                    next_r, next_c = r + dr, c + dc
+
+                    # Quick bounds and forward direction check
+                    if (
+                        0 <= next_r < BOARD_N
+                        and 0 <= next_c < BOARD_N
+                        and (dr == forward or dr == 0)
+                    ):
+                        # Fast check for lily pad at destination
+                        next_pos = next_r * BOARD_N + next_c
+                        if self.lilly_bits & (1 << next_pos):
+                            move = MoveAction(Coord(r, c), [direction])
+                            possible_moves.append((move, Coord(next_r, next_c)))
+
+                            if lazy_ret:
+                                return possible_moves
 
                 # Attempt a jump
                 mid_r, mid_c = r + dr, c + dc
                 land_r, land_c = mid_r + dr, mid_c + dc
-                # Bounds + occupied + not yet visited
-                if (
-                    0 <= mid_r < N
-                    and 0 <= mid_c < N
-                    and 0 <= land_r < N
-                    and 0 <= land_c < N
-                    and board[mid_r][mid_c] in (F, O)
-                    and (land_r, land_c) not in visited
-                ):
-                    # Validate hop
-                    hop_check = MoveAction(Coord(mid_r, mid_c), [direction])
-                    if is_valid(hop_check, forward):
-                        new_dirs = path_dirs + [direction]
-                        action = MoveAction(coord, new_dirs)
-                        possible_moves.append((action, Coord(land_r, land_c)))
 
-                        # Create a new visited set for this path to avoid interference
-                        new_visited = visited.copy()
-                        new_visited.add((land_r, land_c))
-                        stack.append((land_r, land_c, new_dirs, new_visited, True))
+                # Compute bit positions
+                mid_pos = (
+                    mid_r * BOARD_N + mid_c
+                    if 0 <= mid_r < BOARD_N and 0 <= mid_c < BOARD_N
+                    else -1
+                )
+                land_pos = (
+                    land_r * BOARD_N + land_c
+                    if 0 <= land_r < BOARD_N and 0 <= land_c < BOARD_N
+                    else -1
+                )
+
+                # Quick bounds checks
+                if mid_pos == -1 or land_pos == -1 or (land_r, land_c) in visited:
+                    continue
+
+                # Check if mid cell has a piece (any player) and land cell is a lily pad
+                mid_bit = 1 << mid_pos
+                land_bit = 1 << land_pos
+
+                if (
+                    (self.frog_bits & mid_bit or self.opp_bits & mid_bit)
+                    and (self.lilly_bits & land_bit)
+                    and (dr == forward or dr == 0)  # Forward direction check
+                ):
+                    new_dirs = path_dirs + [direction]
+                    action = MoveAction(coord, new_dirs)
+                    possible_moves.append((action, Coord(land_r, land_c)))
+
+                    if lazy_ret:
+                        return possible_moves
+
+                    # Add to stack for next jump
+                    new_visited = visited.copy()
+                    new_visited.add((land_r, land_c))
+                    stack.append((land_r, land_c, new_dirs, new_visited, True))
 
         return possible_moves
 
-    def get_possible_move_rec(self, coord, visited, in_jump=False):
-        possible_jumps = []
-        visited.add(coord)
-        forward = 1 if self.current_player == self.FROG else -1
-
-        for direction in Direction:
-            single_jump = MoveAction(coord, [direction])
-            if self.is_valid_move(single_jump, forward) and not in_jump:
-                possible_jumps.append((single_jump, coord + direction))
-
-            try:
-                first_jump = coord + direction
-                double_jump_res = coord + direction + direction
-            except ValueError:
-                continue
-            if (
-                self.is_valid_move(MoveAction(first_jump, [direction]), forward)
-                and (double_jump_res not in visited)
-                and self.board[first_jump.r][first_jump.c] in [self.FROG, self.OPPONENT]
-            ):
-                double_jump = MoveAction(coord, [direction])
-                possible_jumps.append((double_jump, double_jump_res))
-                for jump, res in self.get_possible_move_rec(
-                    double_jump_res, visited, True
-                ):
-                    possible_jumps.append(
-                        (MoveAction(coord, [direction] + list(jump.directions)), res)
-                    )
-
-        return possible_jumps
-
-    # has been optimized
-
-    def is_valid_move(self, move: MoveAction, forward: int = 1) -> bool:
-        # 1) Localize everything
+    def is_valid_move(self, move: MoveAction, forward: int = 1):
+        """
+        Efficiently validates moves using bit operations
+        """
         r, c = move.coord.r, move.coord.c
         directions = move.directions
         n_dirs = len(directions)
-        board = self.board
-        FROG, OPP, LILLY = self.FROG, self.OPPONENT, self.LILLY
-        bn = BOARD_N
 
-        # 2) Precompute a bitmask for “is frog or opponent?”
-        #    (if your enums are bit‐flags, else omit this)
-        foe_mask = FROG | OPP
-
-        # 3) Loop without enumerate(), avoid tuple unpacking & attribute lookups
+        # Process each direction
         for idx in range(n_dirs):
             d = directions[idx]
-            dr, dc = d.r, d.c
+            dr, dc = d.value.r, d.value.c
 
-            # 4) Fast forward check
+            # Fast forward check, only forward moves are valid
             if dr != forward and dr != 0:
                 return False
 
-            # 5) Compute new row/col
-            nr = r + dr
-            nc = c + dc
+            # Compute new coordinates
+            nr, nc = r + dr, c + dc
 
-            # 6) Single bounds check
-            if not (0 <= nr < bn and 0 <= nc < bn):
+            # Bounds check
+            if not (0 <= nr < BOARD_N and 0 <= nc < BOARD_N):
                 return False
 
-            cell = board[nr][nc]
+            # Get bit position
+            cell_pos = nr * BOARD_N + nc
+            cell_bit = 1 << cell_pos
 
-            # 7) Intermediate or final check
+            # Check cell type
             if idx < n_dirs - 1:
-                # must be a piece (frog or opp)
-                # using bitmask test is slightly faster than "cell != A and cell != B"
-                if (cell & foe_mask) == 0:
+                # Intermediate hop must be a piece (frog or opp)
+                if not ((self.frog_bits & cell_bit) or (self.opp_bits & cell_bit)):
                     return False
             else:
-                # landing must be lily
-                if cell != LILLY:
+                # Final landing must be lily
+                if not (self.lilly_bits & cell_bit):
                     return False
 
-            # 8) Advance for the next iteration
+            # Update for next iteration
             r, c = nr, nc
 
         return True
 
     def _move_priority(self, move):
         """
-        A stronger heuristic for prioritizing moves when expanding:
-        - Grow actions early get top billing
-        - Forward-move distance, with extra for multi-jumps
-        - Bonus for moving toward center columns
-        - Small penalty if landing spot lets your opponent have big jumps
-        Returns a float: higher == better.
+        A heuristic for prioritizing moves when expanding
         """
         action, res = move
-        board = self.board
+
+        # Get true board state
         me = self.current_player
         mid = (BOARD_N - 1) / 2
 
         # 1) GrowAction: more valuable the fewer lilies on board
         if isinstance(action, GrowAction):
-            lily_count = (board == BitBoard.LILLY).sum()
+            # Count lilies using bit operations
+            lily_count = bin(self.lilly_bits).count("1")
+
             # scale [0..1]: when lily_count=0 → 1.0, when full → 0.0
             grow_score = 1.0 - (lily_count / (BOARD_N * BOARD_N))
-            # give grow a solid boost early (you could even taper by turn)
+            # give grow a solid boost early
             return 2.0 * grow_score
 
         # 2) it's a MoveAction: compute forward distance
         start_r, start_c = action.coord.r, action.coord.c
         end_r, end_c = res.r, res.c
         # forward delta (frogs down, opponent up)
-        delta = (end_r - start_r) if me == BitBoard.FROG else (start_r - end_r)
+        delta = (end_r - start_r) if me == BitBoard.RED else (start_r - end_r)
 
         # 3) multi-jump bonus
         num_hops = len(action.directions)
@@ -343,14 +704,34 @@ class BitBoard:
         center_gain = abs(start_c - mid) - abs(end_c - mid)
         center_bonus = center_gain / BOARD_N  # normalize
 
-        # 5) blocking penalty: if the opponent on next turn can jump far from this landing
-        #    quick approximation: count their max hop from this cell
-        #    (you can comment this out if it's too slow)
-        temp = BitBoard(board.copy())
+        # 5) blocking penalty: if opponent can jump far from landing
+        temp = BitBoard()
+        temp.lilly_bits = self.lilly_bits
+        temp.frog_bits = self.frog_bits
+        temp.opp_bits = self.opp_bits
         temp.current_player = me
-        temp.board[start_r][start_c] = BitBoard.EMPTY
-        temp.board[end_r][end_c] = me
+        temp._update_occupied_mask()
+
+        # Use bit operations to set cells efficiently
+        start_pos = start_r * BOARD_N + start_c
+        end_pos = end_r * BOARD_N + end_c
+        start_bit = 1 << start_pos
+        end_bit = 1 << end_pos
+
+        # Clear the start position
+        if me == self.RED:
+            temp.frog_bits &= ~start_bit
+            temp.frog_bits |= end_bit
+        else:
+            temp.opp_bits &= ~start_bit
+            temp.opp_bits |= end_bit
+
+        # Clear lily at destination
+        temp.lilly_bits &= ~end_bit
+        temp._update_occupied_mask()
+
         temp.toggle_player()
+
         opp_max = 0
         for mv, mv_res in temp.get_all_moves():
             if isinstance(mv, MoveAction):
@@ -373,7 +754,7 @@ class BitBoard:
         # compute vertical delta: forward (+), horizontal (0), backward (-)
         delta = res.r - action.coord.r
         # adjust sign if opponent
-        if self.current_player != BitBoard.FROG:
+        if self.current_player != BitBoard.RED:
             delta = -delta
         return delta
 
@@ -394,19 +775,21 @@ class BitBoard:
                 color_code = "\033[32m"
             return f"{bold_code}{color_code}{str}\033[0m"
 
-        board = self.get_board()
         output = ""
         for r in range(BOARD_N):
             for c in range(BOARD_N):
-                state = board[r][c]
-                if state == self.LILLY:
+                # Get state using bit operations
+                pos = r * BOARD_N + c
+                bit_pos = np.uint64(1 << pos)
+                if self.lilly_bits & bit_pos:
                     text = "*"
-                elif state == self.OPPONENT or state == self.FROG:
-                    text = "B" if state == self.OPPONENT else "R"
-                elif state == self.EMPTY:
-                    text = "."
+                elif self.frog_bits & bit_pos:
+                    text = "R"
+                elif self.opp_bits & bit_pos:
+                    text = "B"
                 else:
-                    text = " "
+                    text = "."
+
                 output += apply_ansi(text, bold=False)
                 output += " "
             output += "\n"
@@ -414,389 +797,108 @@ class BitBoard:
 
     def get_adjacent_leapfrog(self, coord: Coord, player):
         """
-        Return a list of Coord positions where a lily pad is adjacent to the given Coord.
+        Return a count of lily pad positions where a leap is possible from the given Coord.
         """
-        adjacent = []
-        for direction in Direction:
-            if player == BitBoard.FROG:
-                if direction.c <= 0:
-                    continue
-            if player == BitBoard.OPPONENT:
-                if direction.c >= 0:
-                    continue
+        adjacent_count = 0
+        r, c = coord.r, coord.c
 
-            next_r = coord.r + direction.r + direction.r
-            next_c = coord.c + direction.c + direction.c
+        for dr, dc, _ in self._OFFSETS:
+            # Skip directions based on player
+            if player == BitBoard.RED and dc <= 0:
+                continue
+            if player == BitBoard.BLUE and dc >= 0:
+                continue
+
+            # Calculate double jump position
+            next_r = r + 2 * dr
+            next_c = c + 2 * dc
+
             if 0 <= next_r < BOARD_N and 0 <= next_c < BOARD_N:
-                if self.board[next_r][next_c] == BitBoard.LILLY:
-                    adjacent.append(Coord(next_r, next_c))
-        return len(adjacent)
+                # Check if destination is a lily pad
+                pos = next_r * BOARD_N + next_c
+                if self.lilly_bits & (1 << pos):
+                    adjacent_count += 1
 
-    def evaluate_position(self, simple = True):
-        """Heuristic function that figures out
-        whether a move is generally better for
-        a given side
-        """
+        return adjacent_count
 
-        # Available ways to double jump (more better for us)
+    def evaluate_position(self):
+        """Heuristic function that evaluates a position"""
+        # Available ways to double jump
         current_player = self.current_player
         player_skips = 0
         opponent_skips = 0
-        board = self.get_board()
-        players = [BitBoard.FROG, BitBoard.OPPONENT]
+        players = [BitBoard.RED, BitBoard.BLUE]
         opponent_player = [x for x in players if x != self.current_player].pop()
 
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if board[r][c] == current_player:
-                    location = Coord(r, c)
-                    player_skips += self.get_adjacent_leapfrog(location, current_player)
-                elif board[r][c] == opponent_player:
-                    location = Coord(r, c)
-                    opponent_skips += self.get_adjacent_leapfrog(
-                        location, opponent_player
-                    )
+        # Get positions for current player and opponent
+        current_player_positions = self.get_all_pos(current_player)
+        opponent_player_positions = self.get_all_pos(opponent_player)
+
+        # Calculate skip options
+        for pos in current_player_positions:
+            player_skips += self.get_adjacent_leapfrog(pos, current_player)
+
+        for pos in opponent_player_positions:
+            opponent_skips += self.get_adjacent_leapfrog(pos, opponent_player)
+
         skip_advantage = scaled_sigmoid(player_skips - opponent_skips, input_range=5)
 
-        # Now we want advancement level:
+        # Calculate advancement level using bit operations
         score = 0
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if board[r][c] == self.current_player:
-                    match self.current_player:
-                        case BitBoard.FROG:
-                            score += r
-                            break
-                        case BitBoard.OPPONENT:
-                            score += BOARD_N - 1 - r
-                            break
-                elif board[r][c] == opponent_player:
-                    match self.current_player:
-                        case BitBoard.FROG:
-                            score -= BOARD_N - 1 - r
-                            break
-                        case BitBoard.OPPONENT:
-                            score -= r
-                            break
-                    score -= (
-                        BOARD_N - 1 - r
-                    )  # still an error here, not calculated coorectl
-        if simple:
-            return score/64
+
+        # For RED player - score is higher for pieces further down the board
+        if self.current_player == BitBoard.RED:
+            frog_pieces = self.get_all_pos(BitBoard.RED)
+            for pos in frog_pieces:
+                score += pos.r
+
+            opponent_pieces = self.get_all_pos(BitBoard.BLUE)
+            for pos in opponent_pieces:
+                score -= BOARD_N - 1 - pos.r
+        else:
+            # For BLUE player - score is higher for pieces further up the board
+            opponent_pieces = self.get_all_pos(BitBoard.BLUE)
+            for pos in opponent_pieces:
+                score += BOARD_N - 1 - pos.r
+
+            frog_pieces = self.get_all_pos(BitBoard.RED)
+            for pos in frog_pieces:
+                score -= pos.r
 
         score = scaled_sigmoid(score, input_range=10)
         cluster_score = self.clustering_score()
 
         weighted_score = (5 * score + 3 * skip_advantage + cluster_score) / 9
-        if weighted_score < 0.1:
-            return 0.1
-        if weighted_score > 0.9:
-             return 0.9
-        return weighted_score
-        # print(weighted_score)
-        # print(self.render())
-        if weighted_score > 0.5:
-            return 1
-        return -1
-        # Clustering level?
+        return 2 * weighted_score - 1
 
     def get_coordinates(self):
-        board = self.get_board()
-        coordinates = []
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if board[r][c] == self.current_player:
-                    coordinates.append((r, c))
-        return coordinates
+        coords = self.get_all_pos(self.current_player)
+        return [(coord.r, coord.c) for coord in coords]
 
     def clustering_score(self, ideal_dist=2, sigma=0.5):
         coords = self.get_coordinates()
-        # Calculate the centroid of the points (mean of coordinates)
+
+        # Calculate the centroid of the points
         centroid = np.mean(coords, axis=0)
+
         # Calculate the Manhattan distance from each point to the centroid
         distances = [np.abs(np.array(p) - centroid).sum() for p in coords]
         avg_dist_to_centroid = np.mean(distances)
+
         # Gaussian penalty for the difference from the ideal distance
         penalty = ((avg_dist_to_centroid - ideal_dist) ** 2) / (2 * sigma**2)
 
         # Compute the score using the Gaussian function
         score = np.exp(-penalty)
+
         # Clamp the score to be between 0 and 1
         return max(0, min(1, score))
 
-    def dijkstra_algorithm(self, compressions, start_row):
-        """
-        Performs Dijkstra's algorithm (or uniform cost search in this case)
-        search on the simplified representation of the problem, to return a heuristic.
-        Using Dijkstra allows for the option of non-uniform costs in the future.
-        """
-
-        # Defines the winning condition
-        if self.current_player == BitBoard.FROG:
-            target = BOARD_N - 1
-        else:
-            target = 0
-
-        # Initialises dijkstra, assuming all distances are inf initially
-        distances = {i: float("inf") for i in range(start_row, BOARD_N)}
-        distances[start_row] = 0
-        queue = [(0, start_row)]
-
-        while queue:
-            # Explore the most promising search node
-            cost, current = heapq.heappop(queue)
-
-            # If target is at the frontier, we must have found shortest the path to it
-            if current == target:
-                return cost
-
-            next_row = current + 1
-            if next_row < BOARD_N and cost + 1 < distances[next_row]:
-                distances[next_row] = cost + 1
-                heapq.heappush(queue, (cost + 1, next_row))
-
-            # Update graph based on any available compressions
-            if current in compressions:
-                for jump in compressions[current]:
-                    next_row = current + jump
-                    if next_row < BOARD_N and cost + 1 < distances[next_row]:
-                        distances[next_row] = cost + 1
-                        heapq.heappush(queue, (cost + 1, next_row))
-
-        # Return infinity if solution not possible (although technically always should be)
-        return float("inf")
-
-    def get_all_optimal_moves(self):
-        all_moves = []
-        for coord in self.get_all_pos(self.current_player):
-            # print(coord)
-            move_set = self.a_star_new(coord)
-            if move_set:
-                all_moves.append(
-                    move_set[0]
-                )  # just need the first move in the optimal seq
-                # print(coord)
-                # for move, res in move_set:
-                #     print(move, res)
-        all_moves.append((GrowAction(), None))
-
-        return all_moves
-
-    def a_star_new(self, coord):
-        start = coord
-        if self.current_player == BitBoard.FROG:
-            target = BOARD_N - 1
-        else:
-            target = 0
-
-        # precompute heuristics per row
-        compressions = self.get_all_compressions()
-        h = [self.jump_heuristic(r, compressions) for r in range(BOARD_N)]
-
-        # priority queue holds (f, coord, bitboard)
-        open_heap = []
-        # make a fresh copy of self for the root
-        root_bb = BitBoard(self.board.copy())
-        root_bb.current_player = self.current_player
-
-        counter = itertools.count()
-
-        heapq.heappush(open_heap, (h[start.r], next(counter), start, root_bb))
-
-        came_from = {}
-        g_score = {start: 0}
-
-        while open_heap:
-            f, _, current, bb = heapq.heappop(open_heap)
-            if current.r == target:
-                return self.reconstruct_path(came_from, current)
-
-            # generate all hops *from this exact board*
-            for action, neighbor in bb.get_possible_move(current):
-                tentative_g = g_score[current] + 1
-                if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                    g_score[neighbor] = tentative_g
-                    came_from[neighbor] = (current, action)
-                    new_f = tentative_g + h[neighbor.r]
-
-                    # make the hopped board
-                    new_bb = bb.move(action, neighbor)
-                    # preserve the same player so forward stays 1
-                    new_bb.current_player = bb.current_player
-
-                    heapq.heappush(open_heap, (new_f, next(counter), neighbor, new_bb))
-
-        return None
-
-    def a_star(self, coord):
-        """The main A* search function.
-        It uses a priority queue along with the informed
-        heuristic above to find the optimal path to the goal."""
-        start = coord
-
-        # Finds all compressions for the board
-        compression_dict = self.get_all_compressions()
-
-        # Pre computes heuristic values so we don't repeatedly calculate them
-        heuristic_dict = {}
-        for i in range(BOARD_N):
-            heuristic_dict[i] = self.jump_heuristic(i, compression_dict)
-
-        if start is None:
-            return None
-
-        closed_set = set()
-        came_from = {}
-        g_score = {start: 0}
-
-        open_heap = []
-        heapq.heappush(open_heap, (heuristic_dict[start.r], start))
-
-        # --------------- Search logic -------------#
-        while open_heap:
-            # don't need f_score, just for the heap
-            _, current = heapq.heappop(open_heap)
-
-            # If we are
-            if current.r == BOARD_N - 1:
-                return self.reconstruct_path(came_from, current)
-
-            closed_set.add(current)
-
-            moves = self.get_possible_move(current)
-
-            for move, neighbor in moves:
-                if neighbor in closed_set:
-                    continue
-
-                saved_board = self.board
-                tmp = BitBoard(saved_board.copy())
-                # tmp = tmp.move(move, neighbor)
-                tmp.current_player = self.current_player
-                tmp.board[current.r][current.c] = BitBoard.EMPTY
-                tmp.board[neighbor.r][neighbor.c] = self.current_player
-
-                # 2) swap it in so get_possible_move() will see the frog up at `neighbor`
-                self.board = tmp.board
-
-                possible_g_score = g_score[current] + 1  # each move costs 1
-
-                if neighbor not in g_score or possible_g_score < g_score[neighbor]:
-                    came_from[neighbor] = (current, move)
-                    g_score[neighbor] = possible_g_score
-                    new_f_score = possible_g_score + heuristic_dict[neighbor.r]
-                    heapq.heappush(open_heap, (new_f_score, neighbor))
-
-                self.board = saved_board
-
-        return None
-
-    def reconstruct_path(self, came_from, current: Coord):
-        """Uses the came_from dictionary to reconstruct the path from the start"""
-        path = []
-        node = current
-        # Walk backwards from the goal
-        while node in came_from:
-            parent, action = came_from[node]
-            path.append((action, node))
-            node = parent
-
-        path.reverse()
-        return path
-
-        total_path = []
-        while current in came_from:
-            current, move = came_from[current]
-            total_path.append(move)
-
-        return total_path[::-1]
-
-    def get_all_compressions(self) -> dict:
-        """A function that takes the board and a list of blue locations and returns a
-        graph of the possible connections between rows on the board via jumps in the form of a dictionary."""
-
-        locations = self.get_all_pos(self.current_player)
-
-        if not locations:
-            return {}
-
-        compressions = {}
-
-        if self.current_player == BitBoard.FROG:
-            offsets = [
-                (self.SAME, self.RIGHT),
-                (self.SAME, self.LEFT),
-                (self.UP, self.LEFT),
-                (self.UP, self.SAME),
-                (self.UP, self.RIGHT),
-            ]
-        else:
-            offsets = [
-                (self.SAME, self.RIGHT),
-                (self.SAME, self.LEFT),
-                (self.DOWN, self.LEFT),
-                (self.DOWN, self.SAME),
-                (self.DOWN, self.RIGHT),
-            ]
-
-        coords = []
-        for location in locations:
-            for offset in offsets:
-                try:
-                    r = offset[0]
-                    c = offset[1]
-                    coords.append(location + Coord(r, c))
-                except ValueError:
-                    # Skip invalid coordinates
-                    continue
-                # r = offset[0]
-                # c = offset[1]
-                # safe_col = (c + location.c >= 0) and (c + location.c < BOARD_N)
-                # safe_row = (r + location.r >= 0) and (r + location.r < BOARD_N)
-                # if safe_col and safe_row:
-                #     coords.append(location + Coord(r, c))
-
-        coordsfiltered = [
-            coord
-            for coord in coords
-            if self.board[coord.r][coord.c] in [self.LILLY, self.OPPONENT, self.FROG]
-        ]
-
-        for coord in coordsfiltered:
-            moves = self.get_possible_move(coord)
-            for move_action, neighbor in moves:
-                distance = neighbor.r - coord.r
-                if distance > 1:
-                    if coord.r not in compressions.keys():
-                        compressions[coord.r] = [distance]
-                    elif distance not in compressions[coord.r]:
-                        compressions[coord.r].append(distance)
-
-        return compressions
-
-    def jump_heuristic(self, row: int, compression_dict):
-        """
-        A function that takes the board, a coordinate, and
-        returns a heurstic for the estimated distance to the end
-        """
-        return self.dijkstra_algorithm(compression_dict, row)
-
 
 def scaled_sigmoid(x, input_range=10, output_range=(0, 1)):
-    """
-    Scales input `x` using a sigmoid function.
-
-    Parameters:
-    - x: The input value (can be any real number).
-    - input_range: Controls how wide the input range is (e.g. 10 means -10 to 10 is the key range).
-    - output_range: Tuple (min, max) to map the sigmoid output to a subrange like (0.2, 0.8).
-
-    Returns:
-    - A float in the specified output range (default is (0, 1)).
-    """
-    # Standard sigmoid centered at 0, scaled to input_range
     normalized = 1 / (1 + math.exp(-x * (2 / input_range)))
+    lo, hi = output_range
+    return lo + normalized * (hi - lo)
 
-    # Map to custom output range if needed
-    out_min, out_max = output_range
-    return out_min + normalized * (out_max - out_min)
+
+

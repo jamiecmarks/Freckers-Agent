@@ -1,6 +1,7 @@
+
 SUBMITTING = False
 
-
+from bitboard_io import *
 from enum import nonmember
 import random
 import numpy as np
@@ -11,9 +12,17 @@ from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
 from .strategy import Strategy
 import time
-
+import os
+# import pandas as pd
 if not SUBMITTING:
     import json
+
+# Need to punish: leaving one of our frogs behind. Generally the cause of losses. 
+# Priorities at different states of the game:
+#   - Early game: Expand forwards as quickly as possible. This is generally done
+    # via double jumps. 
+    # Midgame - distance. we wnat moves which make us advance more than the other team
+    # Endgame - More of a stress on average mobility (mobility of pieces not already finished)
 
 
 """
@@ -27,7 +36,7 @@ SHORTENING_FACTOR = 1
 ASTAR = False
 LARGE_VALUE = 999
 SPEEDUP_FACTOR = 50
-EVAL = "adaptive"
+EVAL = "normal"
 RANDOM_START = 4
 
 class MinimaxSearchNode(Strategy):
@@ -46,48 +55,72 @@ class MinimaxSearchNode(Strategy):
         self.astar = False
         self.cutoff_depth = 4
         self._logging_pv = False
-        if SUBMITTING:
-            self.weights = {"centrality": 0.22914114594459534, "double_jumps": 0.3586330711841583,
-                             "distance": 0.927653968334198, "mobility": 0.19292308390140533}
+        self.history = []
 
-        with open("weights2.json", "r") as wf:
-            self.weights = json.load(wf)
+        self.new_weights = {
+                'distance':1,
+                'goal_count': 1,
+                'connectivity': 1,
+                'dispersion': 1,
+                'mobility_diff': 1,
+                'jump_mobility':1 
+        }
+
+        if SUBMITTING:
+            # Earlygame
+            if self.state.get_ply_count() <20:
+                self.weights = {"centrality": 0.3, "double_jumps": 0.8,
+                           "distance": 10.5, "mobility": 0.1}
+            # Midgame
+            elif self.state.get_ply_count() <40:
+                self.weights = {"centrality": 0.4, "double_jumps": 0.4,
+                           "distance": 10.8, "mobility": 0.3}
+            # Endgame
+            else:   
+                self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
+                           "distance": 10.9127612113952637, "mobility": 0.03814251720905304}
+        else:
+            with open("weights2.json", "r") as wf:
+                self.weights = json.load(wf)
+
 
 
     def check_gameover_next(self):
         board = self.state
+        nd_board = self.state.get_board()
         if board.get_ply_count() > 148:
             # All the neural network stuff
-            eval = 10 * self.simple_eval(new_state)
+            eval = -10 * self.simple_eval(board)
 
-            
-            # F = np.loadtxt("blue_pv_features.csv", delimiter=",", skiprows=1)
+            # F = np.loadtxt("red_pv_features.csv", delimiter=",", skiprows=1)
             # deltas = F[-1] - F[0]
             # norm = np.abs(deltas).sum() + 1e-8
-            # adv = 100 * (deltas / norm) * eval
-            # np.savetxt("blue_advantage.txt", adv, fmt="%.6f")
+            # adv = (deltas / norm) * eval
+            # np.savetxt("red_advantage.txt", adv, fmt="%.6f")
 
             with open("eval.txt", "w") as fp:
-                fp.write(f"{-eval}")
+                fp.write(f"{eval}")
+            return eval
+
         moves = board.get_all_moves()
         for action in moves:
             new_state = board.move(action[0], action[1])
             new_state.toggle_player()  # After move, opponent's turn
             if new_state.is_game_over():
-                eval = 10 * self.simple_eval(new_state)
+                eval = -10 * self.simple_eval(new_state)
 
                 # All the neural network stuff
-                # F = np.loadtxt("blue_pv_features.csv", delimiter=",", skiprows=1)
-    
+                # F = np.loadtxt("red_pv_features.csv", delimiter=",", skiprows=1)
                 # deltas = F[-1] - F[0]
                 # norm = np.abs(deltas).sum() + 1e-8
                 # adv = 100 * (deltas / norm) * eval
-                # np.savetxt("blue_advantage.txt", adv[1:], fmt="%.6f")
-                
+                # print("Red advantage time!")
+                # np.savetxt("red_advantage.txt", adv[1:], fmt="%.6f")
 
                 with open("eval.txt", "w") as fp:
-                    fp.write(f"{-eval}")
-                return 
+                    fp.write(f"{eval}")
+                return eval
+        return 0
 
 
     def cutoff_test(self, state:BitBoard, depth, cutoff_depth):
@@ -105,13 +138,13 @@ class MinimaxSearchNode(Strategy):
         """
         if state.is_game_over():
             frog_count, opp_count = (
-                state.frog_border_count[BitBoard.FROG],
-                state.frog_border_count[BitBoard.OPPONENT],
+                state.frog_border_count[BitBoard.RED],
+                state.frog_border_count[BitBoard.BLUE],
                 )
             if frog_count == BOARD_N - 2 and opp_count != BOARD_N - 2:
-                winner_piece = BitBoard.FROG
+                winner_piece = BitBoard.RED
             elif opp_count == BOARD_N - 2 and frog_count != BOARD_N - 2:
-                winner_piece = BitBoard.OPPONENT
+                winner_piece = BitBoard.BLUE
             else:
                 return 0  # draw
             return float("inf") if winner_piece == self.root_player else float("-inf")
@@ -119,11 +152,102 @@ class MinimaxSearchNode(Strategy):
             return self.adaptive_eval(state)
         return self.simple_eval(state)
 
-    
+    def extract_features(self, state: BitBoard, root_player: int) -> dict:
+        """
+        Compute adversarial feature differences in one board scan.
+        Returns a dict mapping each feature to (root_player - opponent).
+        Features: distance, goal_count, connectivity, dispersion, mobility_diff, jump_mobility
+        """
+        board = state.get_board()
+        halfway = BOARD_N // 2
+
+        # Aggregates for both players
+        agg = {
+            BitBoard.RED: {'distance': 0, 'goal_count': 0, 'connectivity': 0, 'min_row': BOARD_N, 'max_row': -1},
+            BitBoard.BLUE: {'distance': 0, 'goal_count': 0, 'connectivity': 0, 'min_row': BOARD_N, 'max_row': -1}
+        }
+
+        # Single pass: distance, goal_count, connectivity, dispersion bounds
+        for r in range(BOARD_N):
+            for c in range(BOARD_N):
+                piece = board[r][c]
+                if piece in agg:
+                    data = agg[piece]
+                    # Distance/progress
+                    data['distance'] += (r + 1) if piece == BitBoard.RED else (BOARD_N - r)
+                    # Goal occupancy
+                    if (piece == BitBoard.RED and r >= halfway) or (piece == BitBoard.BLUE and r < halfway):
+                        data['goal_count'] += 1
+                    # Connectivity: right & down
+                    if c + 1 < BOARD_N and board[r][c + 1] == piece:
+                        data['connectivity'] += 1
+                    if r + 1 < BOARD_N and board[r + 1][c] == piece:
+                        data['connectivity'] += 1
+                    # Dispersion bounds
+                    data['min_row'] = min(data['min_row'], r)
+                    data['max_row'] = max(data['max_row'], r)
+
+        # Initialize raw feature dicts
+        raw = {p: {} for p in agg}
+        for player, data in agg.items():
+            dispersion = (data['max_row'] - data['min_row']) if data['max_row'] >= data['min_row'] else 0
+            raw[player].update({
+                'distance': data['distance'],
+                'goal_count': data['goal_count'],
+                'connectivity': data['connectivity'],
+                'dispersion': dispersion
+            })
+
+        # Compute mobility_diff and jump_mobility for each
+        current = state.get_current_player()
+        moves = {}
+        for player in (BitBoard.RED, BitBoard.BLUE):
+            if state.get_current_player() != player:
+                state.toggle_player()
+            moves[player] = state.get_all_moves()
+        if state.get_current_player() != current:
+            state.toggle_player()
+
+        for player, my_moves in moves.items():
+            my_count = len(my_moves)
+            opp = BitBoard.RED if player == BitBoard.BLUE else BitBoard.BLUE
+            opp_count = len(moves[opp])
+            mobility_diff = (my_count - opp_count) / (my_count + opp_count + 1)
+            seen = set()
+            for action, dest in my_moves:
+                if not isinstance(action, GrowAction) and abs(action.coord.r - dest.r) > 1:
+                    seen.add((action.coord.r, action.coord.c))
+            jump_mobility = len(seen) / (my_count + 1)
+            raw[player].update({
+                'mobility_diff': mobility_diff,
+                'jump_mobility': jump_mobility
+            })
+
+        # Adversarial differences
+        opp_player = BitBoard.RED if root_player == BitBoard.BLUE else BitBoard.BLUE
+        return {feat: raw[root_player][feat] - raw[opp_player][feat] for feat in raw[root_player]}
+
+
+    def evaluate_with_weights(self, state: BitBoard, root_player: int) -> float:
+        """
+        Compute weighted heuristic score: sum(weight_i * feature_i).
+        Uses adversarial features from extract_features.
+        """
+        feats = self.extract_features(state, root_player)
+        score = 0.0
+        for name, value in feats.items():
+            w = self.weights.get(name, 0.0)
+            score += w * value
+        return score
+
+
+
+
+
     def adaptive_eval(self, state: BitBoard):
         w = self.weights
         me = self.root_player
-        you = BitBoard.FROG if me == BitBoard.OPPONENT else BitBoard.OPPONENT
+        you = BitBoard.RED if me == BitBoard.BLUE else BitBoard.BLUE
         board = state.get_board()
         progress = 0 
 
@@ -131,23 +255,23 @@ class MinimaxSearchNode(Strategy):
         cent_me = cent_you = 0
         
         # Centrality and comparative distance to goal
-        if me == BitBoard.FROG:
+        if me == BitBoard.RED:
             for r in range(BOARD_N): 
                 for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.FROG:
+                    if board[r][c] == BitBoard.RED:
                         progress += (r+1) # Starts at 1 up to 8
                         cent_me += mid - abs(c - mid)
-                    elif board[r][c] == BitBoard.OPPONENT:
+                    elif board[r][c] == BitBoard.BLUE:
                         progress -= (8 - (r)) # Starts at 1 up to 8
                         cent_you += mid - abs(c - mid)
 
-        if me == BitBoard.OPPONENT:
+        if me == BitBoard.BLUE:
             for r in range(BOARD_N):
                 for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.OPPONENT:
+                    if board[r][c] == BitBoard.BLUE:
                         progress += (8 - r) # Starts at up 1 to 8
                         cent_me += mid - abs(c-mid)
-                    elif board[r][c] == BitBoard.FROG:
+                    elif board[r][c] == BitBoard.RED:
                         cent_you += mid - abs(c-mid) 
                         progress -= (r+1) # starts at 1 up to 8
         # 2) mobility
@@ -187,15 +311,8 @@ class MinimaxSearchNode(Strategy):
         norm_mob  = (len(moves_me) - len(moves_you)) / (len(moves_me)+ len(moves_you) + 1)
         norm_cent  = (cent_me - cent_you) / (BOARD_N * BOARD_N)
         norm_doubles = (doubles_me - doubles_you)/(doubles_me + doubles_you + 1)
-        raw = np.array([norm_cent,norm_doubles,progress, norm_mob], dtype=float)
 
-        if self._logging_pv:
-            print("Logging")
-            move_idx = state.get_ply_count()
-            with open("blue_pv_features.csv", "a") as pf:
-                target_str = f"{move_idx},{raw[0]},{raw[1]},{raw[2]},{raw[3]}\n"
-                print(target_str)
-                pf.write(f"{move_idx},{raw[0]},{raw[1]},{raw[2]},{raw[3]}\n")
+
 
         # print("Current player is: ", state.current_player)
         # print("Root player is: ", self.root_player)
@@ -215,15 +332,15 @@ class MinimaxSearchNode(Strategy):
         # If frog, we are moving towards the bottom
         board = state.board
         astar_check = 0
-        if current_player == BitBoard.FROG:
+        if current_player == BitBoard.RED:
             for r in range(BOARD_N): 
                 for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.FROG:
+                    if board[r][c] == BitBoard.RED:
                         astar_check += (r+1)
-        if current_player == BitBoard.OPPONENT:
+        if current_player == BitBoard.BLUE:
             for r in range(BOARD_N):
                 for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.OPPONENT:
+                    if board[r][c] == BitBoard.BLUE:
                         astar_check += (8- (r+1))
         return astar_check
 
@@ -231,21 +348,21 @@ class MinimaxSearchNode(Strategy):
     def simple_eval(self, state):
         current_player = self.root_player
         # If frog, we are moving towards the bottom
-        board = state.board
+        board = state.get_board()
         progress = 0
-        if current_player == BitBoard.FROG:
+        if current_player == BitBoard.RED:
             for r in range(BOARD_N): 
                 for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.FROG:
+                    if board[r][c] == BitBoard.RED:
                         progress += (r+1)
-                    elif board[r][c] == BitBoard.OPPONENT:
+                    elif board[r][c] == BitBoard.BLUE:
                         progress -= (8 - (r))
-        if current_player == BitBoard.OPPONENT:
+        if current_player == BitBoard.BLUE:
             for r in range(BOARD_N):
                 for c in range(BOARD_N):
-                    if board[r][c] == BitBoard.OPPONENT:
+                    if board[r][c] == BitBoard.BLUE:
                         progress += (8 - (r))
-                    elif board[r][c] == BitBoard.FROG:
+                    elif board[r][c] == BitBoard.RED:
                         progress -= (r+1)
         return progress/64
 
@@ -253,12 +370,7 @@ class MinimaxSearchNode(Strategy):
         if self.cutoff_test(state, depth, cutoff_depth):
             return self.eval_function(state)
         value = float("-inf")
-        if self.astar == True:
-            moves = state.get_all_optimal_moves()
-            newmoves = state.get_all_moves()
-            moves.extend(random.sample(newmoves, len(newmoves)//SHORTENING_FACTOR))
-        else:
-            moves = state.get_all_moves()
+        moves = state.get_all_moves()
 
         for action in moves:
             new_position = state.move(action[0], action[1])
@@ -273,13 +385,7 @@ class MinimaxSearchNode(Strategy):
         if self.cutoff_test(state, depth, cutoff_depth):
             return self.eval_function(state)
         value = float("inf")
-        if self.astar == True:
-            moves = state.get_all_optimal_moves()
-            newmoves = state.get_all_moves()
-            moves.extend(random.sample(newmoves, len(newmoves)//SHORTENING_FACTOR))
-        else:
-            moves = state.get_all_moves()
-
+        moves = state.get_all_moves()
 
         for action in moves:
             new_position = state.move(action[0], action[1])
@@ -293,12 +399,12 @@ class MinimaxSearchNode(Strategy):
 
     def best_action(self, safety_margin: float = 5, bt: float = 0.75):
         # 1) grab the referee‐supplied clock once
-        using_astar = self.state.get_all_optimal_moves()
-        if len(using_astar)>=2 and ASTAR and self.state.get_ply_count() >=40:
-            self.astar = True
-        else:
-            self.astar = False
+        self.history.append((self.state.lilly_bits, self.state.frog_bits, self.state.opp_bits, self.state.get_current_player()))
 
+       # print("bit lengths:", 
+       #     int(self.state.lilly_bits).bit_length(), 
+       #     int(self.state.frog_bits).bit_length(), 
+       #     int(self.state.opp_bits).bit_length())
 
         total_time = self.time_budget
         assert total_time > safety_margin, "No time to move!"
@@ -330,6 +436,8 @@ class MinimaxSearchNode(Strategy):
             move_choice =  random.choice(moves)
             print("Random move for early game")
             return {"action": move_choice[0]}
+        
+        
         early_return_flag = False
         while True and not early_return_flag:
             if time.perf_counter() >= hard_deadline:
@@ -348,13 +456,13 @@ class MinimaxSearchNode(Strategy):
                 new_position = current_state.move(action[0], action[1])
                 new_position.toggle_player()
                 value = self.min_value(new_position, alpha, beta, 1, cutoff_depth)
-
-                if value > best_val:
+                if value >= best_val:
                     best_val = value
                     best_at_depth = action
                     if value > LARGE_VALUE:
                         best_move = action
                         early_return_flag = True
+                        print("Early return due to imminent win")
                         break
 
             if time.perf_counter() < hard_deadline and best_at_depth is not None:
@@ -363,24 +471,45 @@ class MinimaxSearchNode(Strategy):
             else:
                 break       
         print("Best action is", best_move)
-        print("Max depth searched is: ", cutoff_depth-1)
+        print("Max depth searched is: ", cutoff_depth)
 
         # 2) PV logging of chosen move only
         self._pv_features = []
         self._logging_pv = True
         # log root features
-        _ = self.adaptive_eval(self.state)
+        # _ = self.adaptive_eval(self.state)
 
         # apply and log child features
 
         next_state = self.state.move(best_move[0], best_move[1])
         next_state.toggle_player()
-        _ = self.adaptive_eval(next_state)
-        # stop logging
-        self._logging_pv = False
+        self.history.append((next_state.lilly_bits, next_state.frog_bits, next_state.opp_bits, next_state.get_current_player()))
 
+       # print("bit lengths:", 
+       #     self.state.lilly_bits.bit_length(), 
+       #     self.state.frog_bits.bit_length(), 
+       #     self.state.opp_bits.bit_length())
         # 3) check for end-of-game & advantage computation
-        self.check_gameover_next()
+
+
+
+        winner = self.check_gameover_next()
+        flag_path = "bitboards_logged.flag"
+        if not os.path.exists(flag_path) and winner:
+            if winner > 0:
+                print("We have a winner: red")
+            else:
+                print("We have a winner: blue")
+            fname = "bitboards_win.bin" if winner > 0 else "bitboards_loss.bin"
+            print(fname)
+            save_game_record(fname, self.history)
+            print("History saved: ", self.history)
+            # create the flag
+            with open(flag_path, "w") as f:
+                f.write("done")
+
+
+
 
         return {"action": best_move[0]}
 
@@ -392,6 +521,3 @@ class MinimaxSearchNode(Strategy):
 
             # since hard_deadline = t0 + alloc_time ≤ t0 + (total_time - safety_margin),
             # we are guaranteed never to go beyond the referee’s remaining clock.
-
-
-
