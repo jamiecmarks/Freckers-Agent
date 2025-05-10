@@ -40,7 +40,7 @@ BitBoard.hop_count = lambda self: len(self.get_all_moves()) - 1  # exclude grow
 #  Node class
 # ---------------------------------------------------------------------------
 
-import torch
+import pytorch as torch
 from functools import lru_cache
 
 @lru_cache(maxsize=1)
