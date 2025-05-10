@@ -1,5 +1,5 @@
 
-from bitboard_io import *
+from .bitboard_io import *
 import random
 from .bitboard import BitBoard
 from referee.game.actions import GrowAction

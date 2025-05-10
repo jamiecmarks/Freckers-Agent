@@ -13,7 +13,7 @@ from referee.game.coord import Coord
 
 from .bitboard import BitBoard
 from .strategy import Strategy
-from bitboard_io import *
+from .bitboard_io import *
 
 # ---------------------------------------------------------------------------
 #  Utility helpers
@@ -21,7 +21,7 @@ from bitboard_io import *
 
 # at module top
 _GLOBAL_MODEL = BitboardNet()
-_GLOBAL_MODEL.load_state_dict(torch.load("bitboard_model.pt", map_location="cpu"))
+_GLOBAL_MODEL.load_state_dict(torch.load("agent/bitboard_model.pt", map_location="cpu"))
 _GLOBAL_MODEL.eval()
 
 
