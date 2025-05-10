@@ -1,7 +1,7 @@
 # COMP30024 Artificial Intelligence, Semester 1 2025
 # Project Part B: Game Playing Agent
 
-from agent.minimax import MinimaxSearchNode
+from minimax import MinimaxSearchNode
 from referee.game import PlayerColor, Coord, Direction, Action, MoveAction, GrowAction
 from .bitboard import BitBoard
 from .mcts import MonteCarloTreeSearchNode
