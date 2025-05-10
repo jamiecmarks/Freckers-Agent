@@ -1,22 +1,12 @@
 
-SUBMITTING = False
-
-from bitboard_io import *
-from enum import nonmember
+from agent.bitboard_io import *
 import random
-import numpy as np
-from collections import defaultdict
 from .bitboard import BitBoard
-from referee.game.actions import GrowAction, MoveAction
+from referee.game.actions import GrowAction
 from referee.game.constants import BOARD_N
-from referee.game.coord import Coord
 from .strategy import Strategy
 import time
-import os
-# import pandas as pd
-if not SUBMITTING:
-    import json
-
+import torch
 
 """
 
@@ -24,17 +14,22 @@ Minimax works as follows: Expands all possible moves to a given depth.
 Chooses the move that gives the best possible guaranteed perforamnce. 
 
 """
-START_DEPTH = 1
+START_DEPTH = 5
 SHORTENING_FACTOR = 1
 ASTAR = False
 LARGE_VALUE = 999
-SPEEDUP_FACTOR = 50
+SPEEDUP_FACTOR = 1
 EVAL = "adaptive"
-RANDOM_START = 4
+RANDOM_START = 0
+
+# at module top
+_GLOBAL_MODEL = BitboardNet()
+_GLOBAL_MODEL.load_state_dict(torch.load("agent/bitboard_model.pt", map_location="cpu"))
+_GLOBAL_MODEL.eval()
 
 class MinimaxSearchNode(Strategy):
     def __init__(self, state:BitBoard, parent = None, parent_action = None,
-                 time_budget = 178.0, weights = None):
+                 time_budget = 178.0):
         self.state = state
         self.parent = parent
         self.parent_action = parent_action
@@ -49,21 +44,45 @@ class MinimaxSearchNode(Strategy):
         self.cutoff_depth = 4
         self._logging_pv = False
         self.history = []
-        self.weights = self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
+
+        self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
                            "distance": 0.9127612113952637, "mobility": 0.03814251720905304}
+
+
+
+    def neural_eval(self, state, device="cpu"):
+        _GLOBAL_MODEL.to(device)
+        _GLOBAL_MODEL.eval()
+        lilly = state.lilly_bits
+        red = state.frog_bits
+        blue = state.opp_bits
+        tensor = bitboard_to_tensor(lilly, red, blue)
+        X = torch.tensor(tensor[None, ...]).to(device)  # shape (1, 3, 8, 8)
+
+        with torch.no_grad():
+            logits = _GLOBAL_MODEL(X)
+            probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
+
+        # print("Eval for player", state.current_player, probs[0])
+        # Example 1: return red's win probability
+        if state.current_player== BitBoard.RED:
+            return (2 * probs[0] - 1)  # assuming class 1 = red wins
+        return -(2 * probs[0] - 1)
+
+
 
 
     def check_gameover_next(self):
         board = self.state
         if board.get_ply_count() > 148:
-            # All the neural network stuff
+
             eval = -10 * self.simple_eval(board)
-
-
             with open("eval.txt", "w") as fp:
                 fp.write(f"{eval}")
             return eval
+
         moves = board.get_all_moves()
+
         for action in moves:
             new_state = board.move(action[0], action[1])
             new_state.toggle_player()  # After move, opponent's turn
@@ -107,12 +126,13 @@ class MinimaxSearchNode(Strategy):
     def adaptive_eval(self, state: BitBoard):
         w = self.weights
         me = self.root_player
+
         you = BitBoard.RED if me == BitBoard.BLUE else BitBoard.BLUE
         board = state.get_board()
         progress = 0 
 
         mid = (BOARD_N - 1)/2
-        cent_me = cent_you = 0
+        centrality = 0
         
         # Centrality and comparative distance to goal
         if me == BitBoard.RED:
@@ -120,20 +140,21 @@ class MinimaxSearchNode(Strategy):
                 for c in range(BOARD_N):
                     if board[r][c] == BitBoard.RED:
                         progress += (r+1) # Starts at 1 up to 8
-                        cent_me += mid - abs(c - mid)
+                        centrality += mid - abs(c - mid)
                     elif board[r][c] == BitBoard.BLUE:
                         progress -= (8 - (r)) # Starts at 1 up to 8
-                        cent_you += mid - abs(c - mid)
+                        centrality -= mid - abs(c - mid)
 
         if me == BitBoard.BLUE:
             for r in range(BOARD_N):
                 for c in range(BOARD_N):
                     if board[r][c] == BitBoard.BLUE:
                         progress += (8 - r) # Starts at up 1 to 8
-                        cent_me += mid - abs(c-mid)
+                        centrality += mid - abs(c-mid)
                     elif board[r][c] == BitBoard.RED:
-                        cent_you += mid - abs(c-mid) 
+                        centrality -= mid - abs(c-mid) 
                         progress -= (r+1) # starts at 1 up to 8
+        
         # 2) mobility
         swap_back = False
         if state.current_player != self.root_player:
@@ -165,15 +186,17 @@ class MinimaxSearchNode(Strategy):
         
 
         # normalize and combine
+        norm_prog = progress/64
         norm_mob  = (len(moves_me) - len(moves_you)) / (len(moves_me)+ len(moves_you) + 1)
-        norm_cent  = (cent_me - cent_you) / (BOARD_N * BOARD_N)
+        norm_cent  = (centrality)/64
         norm_doubles = (doubles_me - doubles_you)/(doubles_me + doubles_you + 1)
+        
 
         score = (
-            w['distance']   * progress/64
-           + w['mobility']    * norm_mob
-           + w['centrality'] * norm_cent
-           + w['double_jumps'] * norm_doubles
+            w['distance']   * norm_prog
+           # + w['mobility']    * norm_mob
+            # +w['centrality'] * norm_cent
+           # w['double_jumps'] * norm_doubles
         )
         return score
 
@@ -199,7 +222,6 @@ class MinimaxSearchNode(Strategy):
                         progress -= (r+1)
         return progress/64
 
-
     def max_value(self, state: BitBoard, alpha, beta, depth, cutoff_depth):
         if self.cutoff_test(state, depth, cutoff_depth):
             return self.eval_function(state)
@@ -214,7 +236,6 @@ class MinimaxSearchNode(Strategy):
                 return value
             alpha = max(alpha, value) # Max is allowed to determine alpha
         return value
-
 
     def min_value(self, state:BitBoard, alpha, beta, depth, cutoff_depth):
         if self.cutoff_test(state, depth, cutoff_depth):
@@ -236,7 +257,10 @@ class MinimaxSearchNode(Strategy):
         # 1) grab the referee‐supplied clock once
         self.history.append((self.state.lilly_bits, self.state.frog_bits, self.state.opp_bits, self.state.get_current_player()))
 
+
+        # print("value is initially", self.adaptive_eval(self.state))
         total_time = self.time_budget
+        assert total_time > safety_margin, "No time to move!"
 
         # 2) compute moves_left as before
         moves_played = self.state.get_ply_count()
@@ -244,7 +268,7 @@ class MinimaxSearchNode(Strategy):
 
         # 3) ideal slice, then clamp below
         raw_alloc = (total_time - safety_margin) / (moves_left**bt)
-        alloc_time = min(raw_alloc, total_time - safety_margin)
+        alloc_time = min(raw_alloc, total_time - safety_margin)/SPEEDUP_FACTOR
 
         assert alloc_time >= 0
 
@@ -259,26 +283,25 @@ class MinimaxSearchNode(Strategy):
         all_moves = self.state.get_all_moves()
         current_state = self.state
         cutoff_depth = START_DEPTH
+
         if self.state.get_ply_count() < RANDOM_START:
             moves = self.state.get_all_moves()
             move_choice =  random.choice(moves)
             print("Random move for early game")
             return {"action": move_choice[0]}
         
-        
+        best_val = None
         early_return_flag = False
         while True and not early_return_flag:
-            if time.perf_counter() >= hard_deadline:
-                print(time.perf_counter())
-                print(alloc_time)
-                break
 
             best_at_depth = None
             best_val = float("-inf")
             all_moves = self.state.get_all_moves()
-
+            all_moves = [all_moves[-1]] + all_moves[:-1]
 
             for action in all_moves:
+                if cutoff_depth == 1:
+                    print("Legal action for blue is: ", action)
                 if time.perf_counter() >= hard_deadline:
                     break
                 new_position = current_state.move(action[0], action[1])
@@ -288,27 +311,40 @@ class MinimaxSearchNode(Strategy):
                     best_val = value
                     best_at_depth = action
                     if value > LARGE_VALUE:
+                        print("early return")
                         best_move = action
                         early_return_flag = True
                         break
 
-            if time.perf_counter() < hard_deadline and best_at_depth is not None:
-                best_move = best_at_depth
-                cutoff_depth += 1
-            else:
-                break       
+            best_move = best_at_depth
+            break
 
 
         print("Best action is", best_move)
+        # print("value is", self.adaptive_eval(current_state.move(best_move[0], best_move[1])))
         print("Max depth searched is: ", cutoff_depth)
-
 
         next_state = self.state.move(best_move[0], best_move[1])
         next_state.toggle_player()
-        self.history.append((next_state.lilly_bits, next_state.frog_bits,
-                             next_state.opp_bits, next_state.get_current_player()))
+        self.history.append((next_state.lilly_bits, next_state.frog_bits, next_state.opp_bits, next_state.get_current_player()))
 
+
+
+        winner = self.check_gameover_next()
+        fname = "bitboards_win.bin" if winner > 0 else "bitboards_loss.bin"
+        flag_path = "bitboards_logged.flag"
+        if not os.path.exists(flag_path) and winner:
+            if winner >0:
+                print("We have a winner: red")
+            else:
+                print("We have a winner: blue")
+            fname = "bitboards_win.bin" if winner > 0 else "bitboards_loss.bin"
+            print(fname)
+            print("History saved", self.history)
+            save_game_record(fname, self.history)
+            # create the flag
+            with open(flag_path, "w") as f:
+                f.write("done")
 
 
         return {"action": best_move[0]}
-

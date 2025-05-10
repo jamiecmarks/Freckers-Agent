@@ -1,4 +1,3 @@
-
 import numpy as np
 from referee.game.actions import MoveAction, GrowAction
 from referee.game.coord import Coord, Direction
@@ -27,30 +26,20 @@ class BitBoard:
 
     # Precompute row masks for common operations
     # this allows us to get any row in O(1) time
-    _ROW_MASKS = [np.uint64(0)] * BOARD_N
+    _ROW_MASKS = [0] * BOARD_N
     for r in range(BOARD_N):
-        mask = np.uint64(0)
+        mask = 0
         for c in range(BOARD_N):
-            mask |= np.uint64(1 << (r * BOARD_N + c))
+            mask |= 1 << (r * BOARD_N + c)
         _ROW_MASKS[r] = mask
-
-    _ALL_CELLS_MASK = np.uint64((1 << (BOARD_N * BOARD_N)) - 1)
-
-
-    _COL_MASKS = [np.uint64(0)] * BOARD_N
-    for c in range(BOARD_N):
-        mask = np.uint64(0)
-        for r in range(BOARD_N):
-            mask |= np.uint64(1 << (r * BOARD_N + c))
-        _COL_MASKS[c] = mask
-
 
     def __init__(self, board=None):
         # Initialize three 64-bit integers to represent the entire board
         # Each bit corresponds to one cell, with bit position = r*BOARD_N + c
-        self.lilly_bits = np.uint64(0)  # Bits for lily pads
-        self.frog_bits = np.uint64(0)  # Bits for frog pieces
-        self.opp_bits = np.uint64(0)  # Bits for opponent pieces
+
+        self.lilly_bits = 0  # Bits for lily pads
+        self.frog_bits = 0  # Bits for frog pieces
+        self.opp_bits = 0  # Bits for opponent pieces
 
         if board is None:
             # Initialize a fresh bitboard according to game spec
@@ -68,53 +57,52 @@ class BitBoard:
         self.frog_border_count = {self.RED: 0, self.BLUE: 0}
         self.ply_count = 0
 
-
         # Calculate occupied cells mask for faster move generation
         self._update_occupied_mask()
 
     def _update_occupied_mask(self):
         """Updates the mask of all occupied cells"""
-        self.occupied_mask = np.uint64(
+        self.occupied_mask = (
             self.lilly_bits | self.frog_bits | self.opp_bits
         )  # just the OR of all three gives the full picture
 
     def _create_start_bitboard(self):
         """Creates the starting bitboard configuration using bit operations, and the configuration outlined in the spec"""
         # Start with empty boards
-        self.lilly_bits = np.uint64(0)
-        self.frog_bits = np.uint64(0)
-        self.opp_bits = np.uint64(0)
+        self.lilly_bits = 0
+        self.frog_bits = 0
+        self.opp_bits = 0
 
         # Frog pieces
         row_mask = 0
         for c in range(1, BOARD_N - 1):  # Insert all the necessary frogs in row 0
             row_mask |= 1 << c
-        self.frog_bits |= np.uint64(row_mask)  # Top row is at r=0
+        self.frog_bits |= row_mask  # Top row is at r=0
 
         # Set bottom row (BLUE pieces)
         bottom_row_idx = (BOARD_N - 1) * BOARD_N
-        self.opp_bits |= np.uint64(row_mask << bottom_row_idx)
+        self.opp_bits |= row_mask << bottom_row_idx
 
         # lilly pads in row 1 and BOARD_N - 2
-        self.lilly_bits |= np.uint64(row_mask << BOARD_N)  # Row 1
-        self.lilly_bits |= np.uint64(row_mask << ((BOARD_N - 2) * BOARD_N))  # Row BOARD_N - 2
+        self.lilly_bits |= row_mask << BOARD_N  # Row 1
+        self.lilly_bits |= row_mask << ((BOARD_N - 2) * BOARD_N)  # Row BOARD_N - 2
 
         # Corner lily pads
-        self.lilly_bits |= np.uint64(1)
-        self.lilly_bits |= np.uint64(1 << (BOARD_N - 1))  # Top right
-        self.lilly_bits |= np.uint64(1 << ((BOARD_N - 1) * BOARD_N)) # Bottom left
-        self.lilly_bits |= np.uint64(1 << (
+        self.lilly_bits |= 1
+        self.lilly_bits |= 1 << (BOARD_N - 1)  # Top right
+        self.lilly_bits |= 1 << ((BOARD_N - 1) * BOARD_N)  # Bottom left
+        self.lilly_bits |= 1 << (
             (BOARD_N - 1) * BOARD_N + (BOARD_N - 1)
-        ))  # Bottom right
+        )  # Bottom right
 
         # Update occupied cells mask
         self._update_occupied_mask()
 
     def _convert_numpy_to_bitboard(self, np_board):
         """Converts a given numpy 2-d array to our internal bitboard representation, used because the 2d array is much more human-readable"""
-        self.lilly_bits = np.uint64(0)
-        self.frog_bits = np.uint64(0)
-        self.opp_bits = np.uint64(0)
+        self.lilly_bits = 0
+        self.frog_bits = 0
+        self.opp_bits = 0
 
         for r in range(BOARD_N):
             for c in range(BOARD_N):
@@ -122,11 +110,11 @@ class BitBoard:
                 cell_value = np_board[r][c]
 
                 if cell_value == self.LILLY:
-                    self.lilly_bits |= np.uint64(1 << pos)
+                    self.lilly_bits |= 1 << pos
                 elif cell_value == self.RED:
-                    self.frog_bits |= np.uint64(1 << pos)
+                    self.frog_bits |= 1 << pos
                 elif cell_value == self.BLUE:
-                    self.opp_bits |= np.uint64(1 << pos)
+                    self.opp_bits |= 1 << pos
 
         # Update occupied cells mask
         self._update_occupied_mask()
@@ -141,7 +129,7 @@ class BitBoard:
             return None
 
         pos = r * BOARD_N + c
-        bit_pos = np.uint64(1 << pos)
+        bit_pos = 1 << pos
 
         if self.lilly_bits & bit_pos:
             return self.LILLY
@@ -188,7 +176,7 @@ class BitBoard:
         for r in range(BOARD_N):
             for c in range(BOARD_N):
                 pos = r * BOARD_N + c
-                bit_pos = np.uint64(1 << pos)
+                bit_pos = 1 << pos
 
                 if self.lilly_bits & bit_pos:
                     board[r][c] = self.LILLY
@@ -211,19 +199,19 @@ class BitBoard:
         self.frog_border_count = {self.RED: 0, self.BLUE: 0}
 
         # Get bottom row mask
-        bottom_row_mask = int(self._ROW_MASKS[BOARD_N - 1])
+        bottom_row_mask = self._ROW_MASKS[BOARD_N - 1]
 
         # Count frogs in bottom row
-        frogs_in_bottom = bin(int(self.frog_bits) & bottom_row_mask).count(
+        frogs_in_bottom = bin(self.frog_bits & bottom_row_mask).count(
             "1"
         )  # how many 1s are there ?
         self.frog_border_count[self.RED] = frogs_in_bottom  # frogs here means RED frogs
 
         # Get top row mask
-        top_row_mask = int(self._ROW_MASKS[0])
+        top_row_mask = self._ROW_MASKS[0]
 
         # Count opponents in top row using bit operations
-        opps_in_top = bin(int(self.opp_bits) & top_row_mask).count(
+        opps_in_top = bin(self.opp_bits & top_row_mask).count(
             "1"
         )  # blue frogs, all from pov of red for understanding
         self.frog_border_count[self.BLUE] = opps_in_top
@@ -272,7 +260,7 @@ class BitBoard:
         if isinstance(action, MoveAction):
             # Directly compute bit position without using _get_cell
             start_pos = action.coord.r * BOARD_N + action.coord.c
-            start_bit = np.uint64(1 << start_pos)
+            start_bit = 1 << start_pos
 
             # find out what type of piece we're working with here
             if self.frog_bits & start_bit:
@@ -291,54 +279,37 @@ class BitBoard:
             )  # assume grows happen from the perspective of the current player
             empty_cells = (
                 ~self.occupied_mask
-            ) # get all unoccupied cells using bitwise NOT
-            empty = (~self.occupied_mask) & BitBoard._ALL_CELLS_MASK
-
+            )  # get all unoccupied cells using bitwise NOT
 
             # For each direction, shift the player pieces and get potential growth spots
-            growth_spots = np.uint64(0)
+            growth_spots = 0
             for dr, dc, _ in self._OFFSETS:
                 # Calculate shift amount based on direction
                 if dr == 0 and dc == 0:
                     continue  # Skip no movement
 
-                shift_amt = dr * BOARD_N + dc
-                # 2) do the shift in uint64 space
-                if shift_amt > 0:
-                    shifted = pieces_to_check<< np.uint64(shift_amt)
+                shift = dr * BOARD_N + dc
+
+                # Calculate potential growth spots (empty neighbors)
+                if shift > 0:
+                    shifted = pieces_to_check << shift
                 else:
-                    shifted = pieces_to_check >> np.uint64(-shift_amt)
-
-                # 3) mask off any “wrapped” rows:
-
-                if dc > 0:
-                    shifted &= ~BitBoard._COL_MASKS[0]  # remove leftmost column
-                elif dc < 0:
-                    shifted &= ~BitBoard._COL_MASKS[BOARD_N - 1]  # remove rightmost column
-
-                # 4) only keep truly empty spots
-                growth_spots |= shifted & empty
-                ## Calculate potential growth spots (empty neighbors)
-                #if shift > 0:
-                #    shifted = np.uint64(pieces_to_check << shift)
-                #else:
-                #    shifted = np.uint64(pieces_to_check >> abs(shift))
+                    shifted = pieces_to_check >> abs(shift)
 
                 # Mask to keep cells in bounds after shift
-                #if dc > 0:  # RIGHT shift - remove leftmost column
-                #    edge_mask = ~np.uint64(0)
-                #    for r in range(BOARD_N):
-                #        edge_mask &= ~(self._ALL_CELLS_MASK)
-                #    shifted &= edge_mask
-                #elif dc < 0:  # LEFT shift - remove rightmost column
-                #    edge_mask = ~np.uint64(0)
-                #    for r in range(BOARD_N):
-                #        edge_mask &= ~(self._ALL_CELLS_MASK)
-                #    shifted &= edge_mask
+                if dc > 0:  # RIGHT shift - remove leftmost column
+                    edge_mask = ~0
+                    for r in range(BOARD_N):
+                        edge_mask &= ~(1 << (r * BOARD_N))
+                    shifted &= edge_mask
+                elif dc < 0:  # LEFT shift - remove rightmost column
+                    edge_mask = ~0
+                    for r in range(BOARD_N):
+                        edge_mask &= ~(1 << (r * BOARD_N + BOARD_N - 1))
+                    shifted &= edge_mask
 
-                ## Add these spots to growth spots if they're empty
-                #growth_spots |= np.uint64(shifted & empty_cells)
-            growth_spots &= BitBoard._ALL_CELLS_MASK
+                # Add these spots to growth spots if they're empty
+                growth_spots |= shifted & empty_cells
 
             # Set all growth spots to lily pads
             new_board.lilly_bits |= growth_spots
@@ -349,8 +320,8 @@ class BitBoard:
             # Get the bit positions
             start_pos = action.coord.r * BOARD_N + action.coord.c
             end_pos = res.r * BOARD_N + res.c
-            start_bit = np.uint64(1 << start_pos)
-            end_bit = np.uint64(1 << end_pos)
+            start_bit = 1 << start_pos
+            end_bit = 1 << end_pos
 
             # Easy case, just move the piece leaving an empty spot
             if fill == self.RED:
@@ -369,46 +340,24 @@ class BitBoard:
             start_r, start_c = action.coord.r, action.coord.c
             next_r, next_c = start_r, start_c
 
+            # We don't know where this frog ended up, so we go in all the directions greedily until we find the resultant position
             for direction in action.directions:
-               # print("Direction is, ", direction)
-               # print("Board is: ", self.get_board())
-
                 dr, dc = direction.value.r, direction.value.c
                 found_move = False
                 while not found_move:
                     next_r += dr
                     next_c += dc
+                    pos = next_r * BOARD_N + next_c
+                    bit_pos = 1 << pos
 
-                    # 1) STOP if we ever leave the board
-                    if not (0 <= next_r < BOARD_N and 0 <= next_c < BOARD_N):
-                        continue
-
-                    # 2) Safe uint64 mask
-                    idx = next_r * BOARD_N + next_c
-                    bit_pos = np.uint64(1) << np.uint64(idx)
-
-                    # 3) Check for lily and stop
                     if self.lilly_bits & bit_pos:
                         found_move = True
 
-            # We don't know where this frog ended up, so we go in all the directions greedily until we find the resultant position
-           # for direction in action.directions:
-           #     dr, dc = direction.value.r, direction.value.c
-           #     found_move = False
-           #     while not found_move:
-           #         next_r += dr
-           #         next_c += dc
-           #         pos = next_r * BOARD_N + next_c
-           #         bit_pos = np.uint64(1 << pos)
-
-           #         if self.lilly_bits & bit_pos:
-           #             found_move = True
-
             # Apply the move
-            start_pos = np.uint64(start_r * BOARD_N + start_c)
-            end_pos = np.uint64(next_r * BOARD_N + next_c)
-            start_bit = np.uint64(np.uint64(1) << start_pos)
-            end_bit = np.uint64(np.uint64(1) << end_pos)
+            start_pos = start_r * BOARD_N + start_c
+            end_pos = next_r * BOARD_N + next_c
+            start_bit = 1 << start_pos
+            end_bit = 1 << end_pos
 
             # Clear start position
             if fill == self.RED:
@@ -445,7 +394,7 @@ class BitBoard:
             # Extract least significant 1-bit
             lsb = temp_bits & -temp_bits
             # Calculate position index using fast bit counting
-            pos_idx = int(lsb).bit_length() - 1
+            pos_idx = lsb.bit_length() - 1
             # Convert to row, col
             r, c = pos_idx // BOARD_N, pos_idx % BOARD_N
             out.append(Coord(r, c))
@@ -504,7 +453,7 @@ class BitBoard:
         temp_bits = player_bits
         while temp_bits:
             lsb = temp_bits & -temp_bits
-            pos_idx = int(lsb).bit_length() - 1
+            pos_idx = lsb.bit_length() - 1
             r, c = pos_idx // BOARD_N, pos_idx % BOARD_N
             if r != forbidden_row:  # Skip positions in forbidden row
                 all_pos.append(Coord(r, c))
@@ -576,7 +525,7 @@ class BitBoard:
                     ):
                         # Fast check for lily pad at destination
                         next_pos = next_r * BOARD_N + next_c
-                        if self.lilly_bits & np.uint64(1 << next_pos):
+                        if self.lilly_bits & (1 << next_pos):
                             move = MoveAction(Coord(r, c), [direction])
                             possible_moves.append((move, Coord(next_r, next_c)))
 
@@ -604,8 +553,8 @@ class BitBoard:
                     continue
 
                 # Check if mid cell has a piece (any player) and land cell is a lily pad
-                mid_bit = np.uint64(1 << mid_pos)
-                land_bit = np.uint64(1 << land_pos)
+                mid_bit = 1 << mid_pos
+                land_bit = 1 << land_pos
 
                 if (
                     (self.frog_bits & mid_bit or self.opp_bits & mid_bit)
@@ -779,7 +728,8 @@ class BitBoard:
             for c in range(BOARD_N):
                 # Get state using bit operations
                 pos = r * BOARD_N + c
-                bit_pos = np.uint64(1 << pos)
+                bit_pos = 1 << pos
+
                 if self.lilly_bits & bit_pos:
                     text = "*"
                 elif self.frog_bits & bit_pos:
@@ -815,7 +765,7 @@ class BitBoard:
             if 0 <= next_r < BOARD_N and 0 <= next_c < BOARD_N:
                 # Check if destination is a lily pad
                 pos = next_r * BOARD_N + next_c
-                if self.lilly_bits & np.uint64(1 << pos):
+                if self.lilly_bits & (1 << pos):
                     adjacent_count += 1
 
         return adjacent_count
@@ -898,4 +848,3 @@ def scaled_sigmoid(x, input_range=10, output_range=(0, 1)):
     normalized = 1 / (1 + math.exp(-x * (2 / input_range)))
     lo, hi = output_range
     return lo + normalized * (hi - lo)
-

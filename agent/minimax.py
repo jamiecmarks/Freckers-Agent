@@ -1,5 +1,3 @@
-
-from .bitboard_io import *
 import random
 from .bitboard import BitBoard
 from referee.game.actions import GrowAction
@@ -36,13 +34,10 @@ class MinimaxSearchNode(Strategy):
         self.children = []
         self.astar = False
         self.cutoff_depth = 4
-        self._logging_pv = False
         self.history = []
         self.minimax = True
         self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
                            "distance": 0.9127612113952637, "mobility": 0.03814251720905304}
-
-
 
     def check_gameover_next(self):
         board = self.state
@@ -167,9 +162,9 @@ class MinimaxSearchNode(Strategy):
 
         score = (
             w['distance']   * norm_prog
-           # + w['mobility']    * norm_mob
-           + w['centrality'] * norm_cent
-           # w['double_jumps'] * norm_doubles
+        + w['mobility']    * norm_mob
+        + w['centrality'] * norm_cent
+        + w['double_jumps'] * norm_doubles
         )
         return score
 
@@ -261,7 +256,6 @@ class MinimaxSearchNode(Strategy):
             print("Random move for early game")
             return {"action": move_choice[0]}
         
-        
         early_return_flag = False
         while True and not early_return_flag:
             if time.perf_counter() >= hard_deadline:
@@ -284,16 +278,23 @@ class MinimaxSearchNode(Strategy):
                     best_val = value
                     best_at_depth = action
                     if value > LARGE_VALUE:
-                        print("early return")
+
                         best_move = action
                         early_return_flag = True
                         break
+            # Only assign best value at the end of the search
 
+            best_move = best_at_depth
+            # No need to search deeper if we have found a game end
+            if best_val > LARGE_VALUE:
+                break
             if time.perf_counter() < hard_deadline and best_at_depth is not None:
                 best_move = best_at_depth
                 cutoff_depth += 1
             else:
                 break       
+
+
         print("Best action is", best_move)
         print("Max depth searched is: ", cutoff_depth)
 

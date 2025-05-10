@@ -13,16 +13,18 @@ from referee.game.coord import Coord
 
 from .bitboard import BitBoard
 from .strategy import Strategy
-from .bitboard_io import *
+
 
 # ---------------------------------------------------------------------------
 #  Utility helpers
 # ---------------------------------------------------------------------------
 
 # at module top
-_GLOBAL_MODEL = BitboardNet()
-_GLOBAL_MODEL.load_state_dict(torch.load("agent/bitboard_model.pt", map_location="cpu"))
-_GLOBAL_MODEL.eval()
+#_GLOBAL_MODEL = BitboardNet()
+#_GLOBAL_MODEL.load_state_dict(torch.load("agent/bitboard_model.pt", map_location="cpu"))
+#_GLOBAL_MODEL.eval()
+#_WEIGHTS =  dict(np.load("agent/bitboard_model_weights.npz"))
+
 
 
 def _action_key(action: MoveAction, res: Optional[Coord]) -> Tuple:
@@ -40,16 +42,6 @@ BitBoard.hop_count = lambda self: len(self.get_all_moves()) - 1  # exclude grow
 #  Node class
 # ---------------------------------------------------------------------------
 
-import pytorch as torch
-from functools import lru_cache
-
-@lru_cache(maxsize=1)
-def get_global_model(device="cpu"):
-    model = BitboardNet()
-    model.load_state_dict(torch.load("bitboard_model.pt", map_location=device))
-    model.to(device)
-    model.eval()
-    return model
 
 
 class MonteCarloTreeSearchNode(Strategy):
@@ -66,7 +58,7 @@ class MonteCarloTreeSearchNode(Strategy):
     GROW_REQ = 0  # Higher grow requirement to reduce unnecessary grows
     PW_K = 2      # Focused search
     MAX_PLY = 150
-    MAX_ROLLOUT = 24 # Even shorter rollouts for faster iterations
+    MAX_ROLLOUT = 20 # Even shorter rollouts for faster iterations
 
     ROLLOUT_W_PROG = 40  # Extremely high weight for forward progress in rollouts
     ROLLOUT_W_LAT = 1    # Very low weight for lateral movement in rollouts
@@ -302,24 +294,32 @@ class MonteCarloTreeSearchNode(Strategy):
 
         return best if best else random.choice(moves)
 
-
-    def neural_eval(self, state, device="cpu"):
-        _GLOBAL_MODEL.to(device)
-        _GLOBAL_MODEL.eval()
-        lilly = state.lilly_bits
-        red = state.frog_bits
-        blue = state.opp_bits
-        tensor = bitboard_to_tensor(lilly, red, blue)
-        X = torch.tensor(tensor[None, ...]).to(device)  # shape (1, 3, 8, 8)
-
-        with torch.no_grad():
-            logits = _GLOBAL_MODEL(X)
-            probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
-
-        # Example 1: return red's win probability
-        if self.root_player== BitBoard.RED:
-            return 2 * probs[0] - 1  # assuming class 1 = red wins
-        return -(2 * probs[0] - 1)
+#
+#    def neural_eval(self, state, device="cpu"):
+#
+#        lilly = state.lilly_bits
+#        red = state.frog_bits
+#        blue = state.opp_bits
+#
+#        input_tensor = bitboard_to_tensor(lilly, red, blue)
+#        prob = forward_np(input_tensor, _WEIGHTS)
+#
+#        #_GLOBAL_MODEL.to(device)
+#        #_GLOBAL_MODEL.eval()
+#        #lilly = state.lilly_bits
+#        #red = state.frog_bits
+#        #blue = state.opp_bits
+#        #tensor = bitboard_to_tensor(lilly, red, blue)
+#        #X = torch.tensor(tensor[None, ...]).to(device)  # shape (1, 3, 8, 8)
+#
+#       # with torch.no_grad():
+#       #     logits = _GLOBAL_MODEL(X)
+#       #     probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
+#
+#        # Example 1: return red's win probability
+#        if self.root_player== BitBoard.RED:
+#            return 2 * prob - 1  # assuming class 1 = red wins
+#        return -(2 * prob - 1)
 
 
 
@@ -353,7 +353,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 w = BitBoard.BLUE
             res = 0 if w is None else (1 if w == self.root_player else -1)
         else:
-            s = self.neural_eval(bb)
+            s = bb.evaluate_position()
             good = (s > 0) == (bb.get_current_player() == self.root_player)
             res = 1 if good else -1
         MonteCarloTreeSearchNode.SIMS += 1
@@ -393,7 +393,8 @@ class MonteCarloTreeSearchNode(Strategy):
             res, amaf = leaf._simulate()
             leaf._backprop(res, amaf)
             sims = 1
-        if self.AVG_LEN < self.MAX_ROLLOUT-1:
+
+        if self.state.get_ply_count() > 12:
             print("swapping strategies!")
             self.minimax = True
         best = max(self.children, key=lambda c: (c.n(), c.q() / (c.n() + 1e-9)))

@@ -16,17 +16,11 @@ with open("results.txt", "w") as f:
 with tqdm(total=n, desc="Running Games", ncols=100) as pbar:
     total_wins = 0
     for i in range(1, n + 1):
-        if i%2 == 0:
-            subprocess.run(
-                [python_path, "-m", "referee", "agent", "agent2"],
-                stdout = subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        else:
-            subprocess.run(
-                [python_path, "-m", "referee", "agent2", "agent"],
-                stdout = subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-    
+
+        subprocess.run(
+            [python_path, "-m", "referee", "agentblue", "agentred"],
+             stderr=subprocess.DEVNULL
+        )
 
         # Read current win count
         with open("eval.txt", "r") as f:

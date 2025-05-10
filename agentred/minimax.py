@@ -1,4 +1,4 @@
-from bitboard_io import *
+from .bitboard_io import *
 import random
 from .bitboard import BitBoard
 from referee.game.actions import GrowAction
@@ -20,6 +20,11 @@ SPEEDUP_FACTOR = 1
 EVAL = "adaptive"
 RANDOM_START = 0
 
+# at module top
+_GLOBAL_MODEL = BitboardNet()
+_GLOBAL_MODEL.load_state_dict(torch.load("agent/bitboard_model.pt", map_location="cpu"))
+_GLOBAL_MODEL.eval()
+
 class MinimaxSearchNode(Strategy):
     def __init__(self, state:BitBoard, parent = None, parent_action = None,
                  time_budget = 178.0):
@@ -40,6 +45,28 @@ class MinimaxSearchNode(Strategy):
 
         self.weights = {"centrality": 0.09349139034748077, "double_jumps": 0.08574286103248596,
                            "distance": 0.9127612113952637, "mobility": 0.03814251720905304}
+
+
+
+    def neural_eval(self, state, device="cpu"):
+        _GLOBAL_MODEL.to(device)
+        _GLOBAL_MODEL.eval()
+        lilly = state.lilly_bits
+        red = state.frog_bits
+        blue = state.opp_bits
+        tensor = bitboard_to_tensor(lilly, red, blue)
+        X = torch.tensor(tensor[None, ...]).to(device)  # shape (1, 3, 8, 8)
+
+        with torch.no_grad():
+            logits = _GLOBAL_MODEL(X)
+            probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
+
+        # print("Eval for player", state.current_player, probs[0])
+        # Example 1: return red's win probability
+        if state.current_player== BitBoard.RED:
+            return (2 * probs[0] - 1)  # assuming class 1 = red wins
+        return -(2 * probs[0] - 1)
+
 
 
 
@@ -166,7 +193,7 @@ class MinimaxSearchNode(Strategy):
         score = (
             w['distance']   * norm_prog
            # + w['mobility']    * norm_mob
-            +w['centrality'] * norm_cent
+            # +w['centrality'] * norm_cent
            # w['double_jumps'] * norm_doubles
         )
         return score
@@ -239,7 +266,7 @@ class MinimaxSearchNode(Strategy):
 
         # 3) ideal slice, then clamp below
         raw_alloc = (total_time - safety_margin) / (moves_left**bt)
-        alloc_time = min(raw_alloc, total_time - safety_margin)
+        alloc_time = min(raw_alloc, total_time - safety_margin)/SPEEDUP_FACTOR
 
         assert alloc_time >= 0
 
@@ -264,19 +291,17 @@ class MinimaxSearchNode(Strategy):
         best_val = None
         early_return_flag = False
         while True and not early_return_flag:
-            if time.perf_counter() >= hard_deadline:
-                print(time.perf_counter())
-                print(alloc_time)
-                break
 
             best_at_depth = None
             best_val = float("-inf")
             all_moves = self.state.get_all_moves()
 
+            all_moves = [all_moves[-1]] + all_moves[:-1]
 
             for action in all_moves:
-                if time.perf_counter() >= hard_deadline:
-                    break
+
+                if cutoff_depth == 1:
+                    print("Legal action for blue is: ", action)
                 new_position = current_state.move(action[0], action[1])
                 new_position.toggle_player()
                 value = self.min_value(new_position, alpha, beta, 1, cutoff_depth)
@@ -289,11 +314,8 @@ class MinimaxSearchNode(Strategy):
                         early_return_flag = True
                         break
 
-            if time.perf_counter() < hard_deadline and best_at_depth is not None:
-                best_move = best_at_depth
-                cutoff_depth += 1
-            else:
-                break       
+            best_move = best_at_depth
+            break
         print("Best action is", best_move)
         # print("value is", self.adaptive_eval(current_state.move(best_move[0], best_move[1])))
         print("Max depth searched is: ", cutoff_depth)
@@ -301,5 +323,24 @@ class MinimaxSearchNode(Strategy):
         next_state = self.state.move(best_move[0], best_move[1])
         next_state.toggle_player()
         self.history.append((next_state.lilly_bits, next_state.frog_bits, next_state.opp_bits, next_state.get_current_player()))
+
+
+
+        winner = self.check_gameover_next()
+        fname = "bitboards_win.bin" if winner > 0 else "bitboards_loss.bin"
+        flag_path = "bitboards_logged.flag"
+        if not os.path.exists(flag_path) and winner:
+            if winner >0:
+                print("We have a winner: red")
+            else:
+                print("We have a winner: blue")
+            fname = "bitboards_win.bin" if winner > 0 else "bitboards_loss.bin"
+            print(fname)
+            print("History saved", self.history)
+            save_game_record(fname, self.history)
+            # create the flag
+            with open(flag_path, "w") as f:
+                f.write("done")
+
 
         return {"action": best_move[0]}

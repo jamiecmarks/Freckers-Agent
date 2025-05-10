@@ -1,13 +1,13 @@
 import os
 import struct
 import numpy as np
-import pytorch as torch
-import pytorch.nn as nn
-import pytorch.optim as optim
-from pytorch.utils.data import Dataset, DataLoader
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
 import random
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
-import pytorch.nn.functional as F
+import torch.nn.functional as F
 
 
 
@@ -261,4 +261,5 @@ if __name__ == "__main__":
         evaluate_model(model, test_records)
     else:
         print("No model trained.")
+
 
