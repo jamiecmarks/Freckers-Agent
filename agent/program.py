@@ -1,16 +1,12 @@
 # COMP30024 Artificial Intelligence, Semester 1 2025
 # Project Part B: Game Playing Agent
 
+from agent.minimax import MinimaxSearchNode
 from referee.game import PlayerColor, Coord, Direction, Action, MoveAction, GrowAction
-import numpy as np
-import random
 from .bitboard import BitBoard
 from .mcts import MonteCarloTreeSearchNode
-from referee.game.constants import MAX_TURNS
-from .random_strat import RandomStrat
 import cProfile
 import pstats
-from .minimax import MinimaxSearchNode
 
 
 class Agent:
@@ -25,17 +21,13 @@ class Agent:
         Any setup and/or precomputation should be done here.
         """
         self._color = color
-        print("I am a minimax agent")
-
-        with open("red_pv_features.csv", "w") as pf:
-            print("Writing new file")
-            pf.write("move,centrality,double,distance,mobility\n")
+        print("I am an mcts agent")
 
         self.total_moves = 0
         bitboard = BitBoard()
-        self.root = MinimaxSearchNode(bitboard)
-
-
+        self.minimax = False
+        self.root = MonteCarloTreeSearchNode(bitboard)
+        # self.root = MinimaxSearchNode(bitboard)
 
     def action(self, **referee: dict) -> Action:
         """
@@ -53,7 +45,9 @@ class Agent:
 
         self.root.time_budget = referee["time_remaining"]
         action_out = self.root.best_action()  # simulate only as many moves as possible
-
+        if self.root.minimax ==True:
+            print("minimax!")
+            self.minimax = True
         profiler.disable()
 
         stats = pstats.Stats(profiler)
@@ -61,7 +55,7 @@ class Agent:
         stats.strip_dirs().sort_stats("cumulative")
         # Save profiling data for later analysis
         stats.dump_stats("mcts_profile.prof")
-
+        
         # print(action_out["res_node"].state.get_board())
         return action_out["action"]
 
@@ -76,15 +70,20 @@ class Agent:
         # action for demonstration purposes. You should replace this with your
         # own logic to update your agent's internal game state representation.
 
+        if self.root.minimax:
+            new_board = self.root.state.move(action)
+            new_board.toggle_player()
+            child = MinimaxSearchNode(new_board)
+            child.time_budget = referee["time_remaining"]
+            self.root = child
+            return
         child = self.root.find_child(action)
-
         if child is None:
             # create a new child node
             new_board = self.root.state.move(action)
             new_board.toggle_player()
-            child = MinimaxSearchNode(new_board)
-            child.history = self.root.history
-
+            child = MonteCarloTreeSearchNode(new_board)
+        
         child.time_budget = referee["time_remaining"]
 
         self.root = child

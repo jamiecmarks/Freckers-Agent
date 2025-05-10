@@ -5,11 +5,6 @@
 # future project submissions (this is how we identify your team).
 
 metadata = {
-    # Choose a team name! Try to make it unique in some way, as it will be
-    # used to identify your team in the tournament at the end of the semester.
-    # - Allowed characters: A-Z, a-z, 0-9, -, _ (no spaces allowed)
-    # - Minimum length: 3 characters
-    # - Maximum length: 20 characters
     "team_name": f"MergeConflict",
     # Fill in the student IDs and emails of both team members here. There must
     # be exactly two members in the list.
@@ -27,4 +22,4 @@ metadata = {
     ],
 }
 
-{"centrality": 0.49480151495466973, "double_jumps": 0.8521495925088356, "distance": 0.8891959005047221, "mobility": 0.30738559373216234}
+# {"centrality": 0.49480151495466973, "double_jumps": 0.8521495925088356, "distance": 0.8891959005047221, "mobility": 0.30738559373216234}

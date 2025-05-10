@@ -1,422 +1,411 @@
+from __future__ import annotations
+
+import math
 import random
-import numpy as np
+import time
 from collections import defaultdict
-from .bitboard import BitBoard
-from referee.game.actions import GrowAction, MoveAction
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+from referee.game.actions import MoveAction
 from referee.game.constants import BOARD_N
 from referee.game.coord import Coord
+
+from .bitboard import BitBoard
 from .strategy import Strategy
-import time
+from bitboard_io import *
+
+# ---------------------------------------------------------------------------
+#  Utility helpers
+# ---------------------------------------------------------------------------
+
+# at module top
+_GLOBAL_MODEL = BitboardNet()
+_GLOBAL_MODEL.load_state_dict(torch.load("bitboard_model.pt", map_location="cpu"))
+_GLOBAL_MODEL.eval()
+
+
+def _action_key(action: MoveAction, res: Optional[Coord]) -> Tuple:
+    return ("G",) if res is None else (action.coord.r, action.coord.c, res.r, res.c)
+
+
+def _row_prog(player: int, r0: int, r1: int) -> int:
+    return (r1 - r0) if player == BitBoard.RED else (r0 - r1)
+
+
+# quick hop‑count cache for grow heuristic ----------------------------------
+BitBoard.hop_count = lambda self: len(self.get_all_moves()) - 1  # exclude grow
+
+# ---------------------------------------------------------------------------
+#  Node class
+# ---------------------------------------------------------------------------
+
+import torch
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
+def get_global_model(device="cpu"):
+    model = BitboardNet()
+    model.load_state_dict(torch.load("bitboard_model.pt", map_location=device))
+    model.to(device)
+    model.eval()
+    return model
 
 
 class MonteCarloTreeSearchNode(Strategy):
-    avg_playout_depth = 0.0
-    playouts_done = 0
+    # class‑level stats
+    SIMS = 0
+    AVG_LEN = 0.0
+    SPEEDUP_FACTOR = 1
+
+    # hyper‑params
+    C = 0.2  # Reduced exploration for more exploitation
+    W_PROG = 4.0  # Extremely high weight for forward progress
+    W_LAT = 0.1   # Very low weight for lateral movement
+    W_BACK = 20.0  # Extremely high penalty for backwards moves
+    GROW_REQ = 0  # Higher grow requirement to reduce unnecessary grows
+    PW_K = 2      # Focused search
+    MAX_PLY = 150
+    MAX_ROLLOUT = 24 # Even shorter rollouts for faster iterations
+
+    ROLLOUT_W_PROG = 40  # Extremely high weight for forward progress in rollouts
+    ROLLOUT_W_LAT = 1    # Very low weight for lateral movement in rollouts
 
     def __init__(
-        self, state: BitBoard, parent=None, parent_action=None, time_budget=178.0
+
+        self, state: BitBoard, parent=None, parent_action=None, *, time_budget=178.0
     ):
+
+
+
         self.state = state
         self.parent = parent
         self.parent_action = parent_action
+        self.children: List["MonteCarloTreeSearchNode"] = []
         if parent is None:
-            # only the root records who “we” are
             self.root_player = state.get_current_player()
             self.time_budget = time_budget
+            self.depth = 0
         else:
-            # children inherit the real root’s identity & remaining clock
             self.root_player = parent.root_player
             self.time_budget = parent.time_budget
-
-        self.children = []
-        self._number_of_visits = 0
-        self._results = defaultdict(int)
-        self._results[1] = 0
-        self._results[-1] = 0
-        self._total_reward = 0
-        self._untried_actions = self.untried_actions()
-        self.c = 0.2
-
-        if parent:
             self.depth = parent.depth + 1
-        else:
-            self.depth = 0
 
-    def untried_actions(self):
-        blocked = False
-        for row in self.state.get_board():
-            if np.sum(row) == 0:  # there is a 'block'
-                blocked = True
-        if not blocked:
-            opt = self.state.get_all_optimal_moves()
-            # take the top 2–3 optimal, plus 30% of the rest at random
-            extra = random.sample(self.state.get_all_moves(), k=int(0.3 * len(opt)))
-            return opt + extra
-        return self.state.get_all_moves()
+        self._visits = 0
+        self._score = 0
+        self._rave_v: Dict[Tuple, int] = defaultdict(int)
+        self._rave_s: Dict[Tuple, int] = defaultdict(int)
+
+        self._untried = self._ordered_moves()
+        self.minimax = False
+
+    # ------------------------------------------------------------------
+    def n(self):
+        return self._visits
 
     def q(self):
-        # return self._total_reward
-        wins = self._results[1]
-        loses = self._results[-1]
-        return wins - loses
+        return self._score
 
-    def n(self):
-        return self._number_of_visits
+    # ------------------------------------------------------------------
+    #
+    def _frog_spread(self):
+        # for RED, larger r = closer to goal; for BLUE vice versa
+        rows = [
+            r for r, c in self.state.get_all_pos(self.state.get_current_player())
+        ]  # all frog origins
 
-    def expand(self):
-        # sort by heuristic priority once
-        self._untried_actions.sort(
-            key=lambda mv: self.state._move_priority(mv), reverse=True
-        )
-        idx = 0  # pop the very best move first
-        # action_res = self._untried_actions.pop()
+        return max(rows) - min(rows)
 
-        # if self.depth < 5 and self.depth > 1:
-        #     # try to pop a GrowAction first
-        #     for i, (act, res) in enumerate(self._untried_actions):
-        #         if isinstance(act, GrowAction):
-        #             idx = i
-        #             break
-        #     else:
-        #         idx = np.random.randint(len(self._untried_actions))
-        # else:
-        #     idx = np.random.randint(len(self._untried_actions))
-        action_res = self._untried_actions.pop(idx)
-        action, res = action_res
-        next_state = self.state.move(action, res)
-        next_state.toggle_player()
+    def _ordered_moves(self):
+        moves = self.state.get_all_moves()
+        player = self.state.get_current_player()
+        mid = (BOARD_N - 1) // 2
+        base_hops = len(moves) - 1  # exclude grow
 
-        child_node = MonteCarloTreeSearchNode(
-            next_state, parent=self, parent_action=action_res
-        )
+        def score(item):
+            mv, res = item
+            if res is None:
+                # Conservative grow evaluation
+                after = len(self.state.move(mv, res).get_all_moves()) - 1
+                gain = after - base_hops
+                if gain < self.GROW_REQ:
+                    return -10_000
+                
+                # Only consider grows in very early game
+                game_phase = self.state.get_ply_count() / 150
+                if game_phase > 0.1:  # After 10% of game, grows are less valuable
+                    return -5_000
+                
+                # Consider board state
+                lily_count = bin(self.state.lilly_bits).count("1")
+                board_density = lily_count / (BOARD_N * BOARD_N)
+                
+                # More valuable when board is very sparse
+                return 100 * gain * (1 + 2 * board_density)
 
-        if next_state.is_game_over():
-            child_node._number_of_visits += 10
-            child_node._results[1] += 10
+            prog = _row_prog(player, mv.coord.r, res.r)
+            lat = abs(res.c - mid)
+            
+            if prog < 0:
+                return -10_000 - self.W_BACK * abs(prog)  # forbid backward
+            
+            # Enhanced move scoring
+            num_hops = len(mv.directions)
+            jump_bonus = 1000 * (num_hops - 1)  # Extremely strong multi-jump bonus
+            
+            # Forward progress with minimal diminishing returns
+            prog_score = 5000 * prog * (1 - 0.02 * (prog / BOARD_N))
+            
+            # Lateral movement penalty
+            lat_penalty = 20 * lat  # Very low lateral penalty
+            
+            # Position bonus
+            position_bonus = 0
+            game_phase = self.state.get_ply_count() / 150
+            if game_phase < 0.2:  # Early game
+                player_pos = self.state.get_all_pos(player)
+                if player_pos:
+                    avg_r = sum(r for r, _ in player_pos) / len(player_pos)
+                    r_diff = abs(res.r - avg_r)
+                    position_bonus = -100 * r_diff  # Moderate penalty for spreading pieces
+            
+            return prog_score + jump_bonus - lat_penalty + position_bonus
 
-        self.children.append(child_node)
-        return child_node
+        # Sort moves by score
+        moves.sort(key=score, reverse=True)
+        return moves
 
-    def is_terminal_node(self):
-        return self.state.is_game_over()
+    # ------------------------------------------------------------------
+    def _expand(self):
+        mv, res = self._untried.pop(0)
+        nxt = self.state.move(mv, res)
+        nxt.toggle_player()
+        child = MonteCarloTreeSearchNode(nxt, parent=self, parent_action=(mv, res))
+        self.children.append(child)
+        return child
 
-    def fully_expand(self):
-        while not self.is_fully_expanded():
-            self.expand()
+    def _bias(self, mv, res):
+        if res is None:
+            # generous grow bias: benefit proportional to hops gained
+            tmp = self.state.move(mv, res)
+            move_gain = len(tmp.get_all_moves()) - len(self.state.get_all_moves())
+            game_phase = self.state.get_ply_count() / 150
+            return move_gain if game_phase < 0.2 else -0.5 * move_gain
 
-    def new_rollout_policy(self, state, depth=0):
-        """
-        epsilon-greedy + softmax-weighted heuristic playout policy.
-        """
-        moves = state.get_all_moves()
-        num_moves = len(moves)
-        if num_moves == 0:
-            return None
+#            tmp = self.state.move(mv, res)
+#            gain = -1 * (len(self.state.get_all_moves()) - len(tmp.get_all_moves()))
+#            
+#            # Conservative grow bias
+#            game_phase = self.state.get_ply_count() / 150
+#            if game_phase > 0.1:  # After 10% of game, grows are less valuable
+#                return -5
+#            
+#            return 0.1 * gain if gain and self.depth > 2 and self.depth < 30 else -5
 
-        # 1) ε-greedy: 10% of the time, explore uniformly at random
-        #
-        eps = 0 if depth > 15 else 0.02
-        if np.random.rand() < eps:
-            return moves[np.random.randint(num_moves)]
+        p = self.state.get_current_player()
+        prog = _row_prog(p, mv.coord.r, res.r)
+        lat = abs(res.c - (BOARD_N - 1) // 2)
+        if prog < 0:
+            return -self.W_BACK * abs(prog)
 
-        # 2) Otherwise, score each move by your heuristic
-        mid_col = (BOARD_N - 1) // 2
-        scores = []
-        for action, res in moves:
-            score = 0.0
-            if isinstance(action, GrowAction):
-                # early-game grow bonus, late-game penalty
-                if self.state.get_ply_count() < 6:
-                    score = 0
-                else:
-                    score = 0.1
-                    # ratio = len(state.move(action, None).get_all_moves()) / len(
-                    #     state.get_all_moves()
-                    # )  # the increase in moves that we get if we were to grow now
-                    # score += +0.0 if (2 < depth and depth < 15) else ratio * 0.01
-            else:
-                # reward long jumps
-                dist = abs(res.r - action.coord.r)
-                score += dist if dist > 0 else -0.5
-                # centering bonus early
-                if depth < 15:
-                    start_c, end_c = action.coord.c, res.c
-                    if abs(start_c - mid_col) > abs(end_c - mid_col):
-                        score += 0.1
-            scores.append(score)
+        # Enhanced multi-jump bonus
+        num_hops = len(mv.directions)
+        jump_bonus = 2.0 * (num_hops - 1)  # Extremely strong multi-jump bonus
 
-        # 3) Softmax to get a probability distribution
-        x = np.array(scores, dtype=np.float64)
-        # numerical stabilization
-        x = x - np.max(x)
-        exp_x = np.exp(x / 1.0)  # temperature = 1.0; tune if you like
-        probs = exp_x / exp_x.sum()
+        # Position bonus
+        position_bonus = 0
+        game_phase = self.state.get_ply_count() / 150
+        if game_phase < 0.2:  # Early game
+            player_pos = self.state.get_all_pos(p)
+            if player_pos:
+                avg_r = sum(r for r, _ in player_pos) / len(player_pos)
+                r_diff = abs(res.r - avg_r)
+                position_bonus = -1.0 * r_diff  # Moderate penalty for spreading pieces
 
-        # 4) Sample one move according to that distribution
-        choice_idx = np.random.choice(num_moves, p=probs)
-        return moves[choice_idx]
+        return self.W_PROG * prog - self.W_LAT * lat + jump_bonus + position_bonus
 
-    def rollout_policy(self, state, depth=0):
-        weights = []
+    def _uct(self, child):
+        exploit = child.q() / (child.n() + 1e-9)
+        bias = self._bias(*child.parent_action)
+        explore = self.C * math.sqrt(math.log(self.n() + 1) / (child.n() + 1e-9))
 
-        best_score = -float("inf")
-        best_move = None
-        mid_col = (BOARD_N - 1) // 2
-        curr_player = state.get_current_player()
-        scores = []
-        moves = state.get_all_moves()
+        # Progressive bias that decreases with visits
+        prog_bias = bias / (np.log(1 + child.n()) + 1)
 
-        for action, res in moves:
-            score = 0
-            if isinstance(action, GrowAction):
-                score += 0.4 if (depth < 15 and depth > 2) else -0.2
-            else:
-                # e.g. reward long jumps, centering, etc.
+        # Add RAVE bonus for move actions
+        if child.parent_action[1] is not None:  # Only for move actions
+            key = _action_key(*child.parent_action)
+            if self._rave_v[key] > 0:
+                rave_score = self._rave_s[key] / self._rave_v[key]
+                beta = np.sqrt(self.PW_K / (3 * self.n() + self.PW_K))
+                prog_bias = (1 - beta) * prog_bias + beta * rave_score
 
-                vert_dist = abs(res.r - action.coord.r)
-                # 2b) multi-jump bonus
-                #
-                if vert_dist < 1:
-                    score -= 0.9
-                else:
-                    score += 1 * vert_dist
+        return exploit + prog_bias + explore
 
-                # 2c) centering bonus
-                start_c, end_c = action.coord.c, res.c
+    def old_uct(self, child):
+        exploit = child.q() / (child.n() + 1e-9)
+        bias = self._bias(*child.parent_action)
+        explore = self.C * math.sqrt(math.log(self.n() + 1) / (child.n() + 1e-9))
+        return exploit + bias + explore
 
-                if abs(start_c - mid_col) > abs(end_c - mid_col) and depth < 15:
-                    score += 0.1
-
-            scores.append(score)
-            if score > best_score:
-                best_score = score
-                best_move = (action, res)
-
-        raw = scores
-        offset = -min(raw) if min(raw) < 0 else 0
-        adjusted = [s + offset for s in raw]
-        total = sum(adjusted)
-        if total == 0:
-            probs = [1 / len(raw)] * len(raw)
-        else:
-            probs = [a / total for a in adjusted]
-
-        return random.choices(moves, probs)[0]
-
-    # new version of rollout
-    def simulate_playout(self):
-        state = BitBoard(np.copy(self.state.get_board()))
-        state.current_player = self.state.current_player
-        depth = 0
-        max_depth = 150 - self.state.get_ply_count()
-
-        # fast, stateless playout on BitBoard only
-        while not state.is_game_over() and depth < max_depth:
-            if False:
-                # using board eval
-                next_states = {}
-                for action, res in state.get_all_moves():
-                    next_state = state.move(action, res)
-                    next_state.toggle_player()
-                    next_states[next_state] = next_state.evaluate_position()
-
-                raw = next_states.values()
-                offset = -min(raw) if min(raw) < 0 else 0
-                adjusted = [s + offset for s in raw]
-                total = sum(adjusted)
-                if total == 0:
-                    probs = [1 / len(raw)] * len(raw)
-                else:
-                    probs = [a / total for a in adjusted]
-
-                state = random.choices(list(next_states.keys()), weights=probs)[0]
-
-            if True:
-                # using rollout policy
-                action, res = self.new_rollout_policy(state, depth=depth)
-                state = state.move(action, res, in_place=True)  # for performance
-                state.toggle_player()
-
-            # state.toggle_player()
-            # action, res = self.rollout_policy(state, depth=self.depth + depth // 2)
-            # state = state.move(action, res)
-            # state.toggle_player()
-            depth += 1
-
-        MonteCarloTreeSearchNode.playouts_done += 1
-        # incremental average
-        MonteCarloTreeSearchNode.avg_playout_depth += (
-            depth - MonteCarloTreeSearchNode.avg_playout_depth
-        ) / MonteCarloTreeSearchNode.playouts_done
-
-        if state.is_game_over():
-            # compute which side actually reached the goal
-            frog_count, opp_count = (
-                state.frog_border_count[BitBoard.FROG],
-                state.frog_border_count[BitBoard.OPPONENT],
-            )
-            if frog_count == BOARD_N - 2 and opp_count != BOARD_N - 2:
-                winner_piece = BitBoard.FROG
-            elif opp_count == BOARD_N - 2 and frog_count != BOARD_N - 2:
-                winner_piece = BitBoard.OPPONENT
-            else:
-                return 0  # draw
-            return +1 if winner_piece == self.root_player else -1
-
-        return 1 if state.evaluate_position() > 0 else -1
-        # return 1 if self.heuristic_score(state) > 0 else -1
-
-    def heuristic_score(self, state):
-        score = 0
-        board = state.get_board()
-        for r in range(BOARD_N):
-            for c in range(BOARD_N):
-                if board[r][c] == self.state.get_current_player():
-                    match self.state.get_current_player():
-                        case BitBoard.FROG:
-                            score += r
-                            break
-                        case BitBoard.OPPONENT:
-                            score += BOARD_N - 1 - r
-                            break
-                elif board[r][c] not in (BitBoard.LILLY, BitBoard.EMPTY):
-                    match self.state.get_current_player():
-                        case BitBoard.FROG:
-                            score -= BOARD_N - 1 - r
-                            break
-                        case BitBoard.OPPONENT:
-                            score -= r
-                            break
-                    score -= (
-                        BOARD_N - 1 - r
-                    )  # still an error here, not calculated coorectl
-        return score
-
-    def backpropagate(self, result):
-        self._number_of_visits += 1
-        self._results[result] += 1
-        # self._total_reward += result
-
-        if self.parent:
-            self.parent.backpropagate(-result)
-
-    def is_fully_expanded(self):
-        return len(self._untried_actions) == 0
-
-    def dynamic_c(self):
-        # start exploratory, then exploit more later
-        return self.c / (1 + np.log(1 + self.n()))
-
-    def new_tree_policy(self):
-        widen_k = 3
-        node = self
-        while not node.is_terminal_node():
-            # if no child yet, always expand first
-            if len(node.children) == 0:
-                return node.expand()
-
-            # if we still have untried actions AND
-            # we've visited this node enough times, expand
-            if not node.is_fully_expanded() and node.n() > widen_k * len(node.children):
-                return node.expand()
-
-            # otherwise, pick the best child by UCB
-            node = node.UCB_choose()
-
-        return node
+    def _select(self):
+        return max(self.children, key=self._uct)
 
     def _tree_policy(self):
         node = self
-        # descend until we find a node we can expand or a terminal
-        while not node.is_terminal_node():
-            if not node.is_fully_expanded():
-                return node.expand()  # expand one child and return it
-            else:
-                node = node.UCB_choose()
+        while not node.state.is_game_over():
+            if node._untried and node.n() >= len(node.children) * self.PW_K:
+                return node._expand()
+            if not node.children:
+                return node._expand()
+            node = node._select()
         return node
 
-    def UCB_choose(self):
-        # return self.best_child()
-        for child in self.children:
-            if child.n() == 0:
-                return child
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _rollout_move(state: BitBoard):
+        moves = state.get_all_moves()
+        player = state.get_current_player()
+        mid = (BOARD_N - 1) // 2
 
-        # try to add move_prio to UCB1
-        scores = []
-        for c in self.children:
-            value = c.q() / (c.n() + 1e-5)
-            exploration = self.dynamic_c() * np.sqrt(
-                (2 * np.log(self.n() + 1) / (c.n() + 1e-5))
+        # Epsilon-greedy approach with dynamic epsilon
+        game_phase = state.get_ply_count() / 150
+        epsilon = 0.05 * (1 - game_phase)  # Less random in endgame
+        if random.random() < epsilon:
+            return state.get_random_move()
+
+        best_val, best = -1e9, None
+        for mv, res in moves:
+            if res is None:
+                # Very conservative grow consideration
+                if random.random() < 0.05 * (1 - game_phase) and state.hop_count() < 6:
+                    val = 10  # Moderate grow value
+                    if val > best_val:
+                        best_val, best = val, (mv, res)
+                continue
+
+            prog = _row_prog(player, mv.coord.r, res.r)
+            if prog < 0:
+                continue  # Skip backwards
+            lat = abs(res.c - mid)
+            num_hops = len(mv.directions)
+            
+            # Enhanced rollout evaluation
+            val = (
+                MonteCarloTreeSearchNode.ROLLOUT_W_PROG * prog
+                - MonteCarloTreeSearchNode.ROLLOUT_W_LAT * lat
+                + 20 * (num_hops - 1)  # Strong multi-jump bonus
             )
-            priority_bonus = self.state._move_priority(c.parent_action)
-            scores.append(value + exploration + 0.1 * priority_bonus)  # tune this
-        return self.children[np.argmax(scores)]
+            
+            if val > best_val:
+                best_val, best = val, (mv, res)
 
-        scores = [
-            (c.q() / c.n()) + self.dynamic_c() * np.sqrt((2 * np.log(self.n()) / c.n()))
-            for c in self.children
-        ]
-        return self.children[np.argmax(scores)]
+        return best if best else random.choice(moves)
 
-    def choose_next_action(self):
-        # break ties by winrate
-        best = max(
-            self.children,
-            key=lambda c: (c.n(), (self._results[1] / c.n()) if c.n() > 0 else 0),
-        )
-        return best
 
-    def best_action(self, safety_margin: float = 5, beta: float = 0.75):
-        # 1) grab the referee‐supplied clock once
-        total_time = self.time_budget
-        assert total_time > safety_margin, "No time to move!"
+    def neural_eval(self, state, device="cpu"):
+        _GLOBAL_MODEL.to(device)
+        _GLOBAL_MODEL.eval()
+        lilly = state.lilly_bits
+        red = state.frog_bits
+        blue = state.opp_bits
+        tensor = bitboard_to_tensor(lilly, red, blue)
+        X = torch.tensor(tensor[None, ...]).to(device)  # shape (1, 3, 8, 8)
 
-        # 2) compute moves_left as before
-        moves_played = self.state.get_ply_count()
-        total_pred = (
-            type(self).avg_playout_depth if type(self).playouts_done > 0 else 150.0
-        )
-        moves_left = max(1, int(total_pred) - moves_played)
+        with torch.no_grad():
+            logits = _GLOBAL_MODEL(X)
+            probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
 
-        # 3) ideal slice, then clamp below
-        raw_alloc = (total_time - safety_margin) / (moves_left**beta)
-        alloc_time = min(raw_alloc, total_time - safety_margin)
+        # Example 1: return red's win probability
+        if self.root_player== BitBoard.RED:
+            return 2 * probs[0] - 1  # assuming class 1 = red wins
+        return -(2 * probs[0] - 1)
 
-        assert alloc_time >= 0
 
-        # 4) establish one single *absolute* deadline
-        t0 = time.perf_counter()
-        hard_deadline = t0 + alloc_time
 
-        sims = 0
-        # 5) loop until *either* we hit the per‐move slice *or* the referee clock
-        while True:
-            now = time.perf_counter()
-            if now >= hard_deadline:
+    def _simulate(self):
+
+
+
+        bb = BitBoard(np.copy(self.state.get_board()))
+        bb.current_player = self.state.current_player
+        amaf = set()
+
+        depth = 0
+        for depth in range(self.MAX_ROLLOUT):
+            if bb.is_game_over():
                 break
-            # since hard_deadline = t0 + alloc_time ≤ t0 + (total_time - safety_margin),
-            # we are guaranteed never to go beyond the referee’s remaining clock.
-            leaf = self.new_tree_policy()
-            reward = leaf.simulate_playout()
-            leaf.backpropagate(reward)
+
+            mv, res = self._rollout_move(bb)
+            if res is not None and bb.get_current_player() == self.root_player:
+                amaf.add(_action_key(mv, res))
+            bb = bb.move(mv, res, in_place=True)
+
+            bb.toggle_player()
+
+        # evaluate
+        if bb.is_game_over():
+            f, o = bb.frog_border_count.values()
+            w = None
+            if f == BOARD_N - 2 and o != BOARD_N - 2:
+                w = BitBoard.RED
+            elif o == BOARD_N - 2 and f != BOARD_N - 2:
+                w = BitBoard.BLUE
+            res = 0 if w is None else (1 if w == self.root_player else -1)
+        else:
+            s = self.neural_eval(bb)
+            good = (s > 0) == (bb.get_current_player() == self.root_player)
+            res = 1 if good else -1
+        MonteCarloTreeSearchNode.SIMS += 1
+        MonteCarloTreeSearchNode.AVG_LEN += (
+            depth - MonteCarloTreeSearchNode.AVG_LEN
+        ) / MonteCarloTreeSearchNode.SIMS
+        return res, list(amaf)
+
+    # ------------------------------------------------------------------
+    def _backprop(self, result, amaf):
+        self._visits += 1
+        self._score += result
+        for k in amaf:
+            self._rave_v[k] += 1
+            self._rave_s[k] += result
+        if self.parent:
+            self.parent._backprop(-result, amaf)
+
+    # ------------------------------------------------------------------
+    def best_action(self, *, safety_margin=0.5, decay=0.975):
+        t0 = time.perf_counter()
+        rem = self.time_budget - safety_margin
+        assert rem > 0
+        move_no = min(self.state.get_ply_count() // 2, self.MAX_PLY // 2)
+        geo = decay**move_no - decay ** (self.MAX_PLY // 2)
+        slice_t = (rem * (1 - decay) * decay**move_no / geo)# /SPEEDUP_FACTOR
+        deadline = (t0 + slice_t)
+        sims = 0
+
+        while time.perf_counter() < deadline:
+            leaf = self._tree_policy()
+            res, amaf = leaf._simulate()
+            leaf._backprop(res, amaf)
             sims += 1
-
-        # 6) if you managed zero sims, force one expansion so you always return something
-        if sims == 0:
-            self.new_tree_policy()
-
-        # 7) pick the child with most visits
-        best_child = max(self.children, key=lambda c: c.n())
-
-        print(f"[MCTS] sims this move: {sims}")
-
+        if sims == 0 and self._untried:
+            leaf = self._expand()
+            res, amaf = leaf._simulate()
+            leaf._backprop(res, amaf)
+            sims = 1
+        if self.AVG_LEN < self.MAX_ROLLOUT-1:
+            print("swapping strategies!")
+            self.minimax = True
+        best = max(self.children, key=lambda c: (c.n(), c.q() / (c.n() + 1e-9)))
+        print(f"[MCTS] sims={sims}  avg_len={self.AVG_LEN:0.1f}")
         return {
-            "action": best_child.parent_action[0],
-            "res": best_child.parent_action[1],
-            "res_node": best_child,
+            "action": best.parent_action[0],
+            "res": best.parent_action[1],
+            "res_node": best,
         }
 
-    def find_child(self, action):
-        for child in self.children:
-            if child.parent_action[0] == action:
-                return child
+    def find_child(self, action: MoveAction):
+        for ch in self.children:
+            if ch.parent_action[0] == action:
+                return ch
+        return None

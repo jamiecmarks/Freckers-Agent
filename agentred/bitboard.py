@@ -1,4 +1,5 @@
 
+
 import numpy as np
 from referee.game.actions import MoveAction, GrowAction
 from referee.game.coord import Coord, Direction
@@ -112,9 +113,9 @@ class BitBoard:
 
     def _convert_numpy_to_bitboard(self, np_board):
         """Converts a given numpy 2-d array to our internal bitboard representation, used because the 2d array is much more human-readable"""
-        self.lilly_bits = np.uint64(0)
-        self.frog_bits = np.uint64(0)
-        self.opp_bits = np.uint64(0)
+        self.lilly_bits = 0
+        self.frog_bits = 0
+        self.opp_bits = 0
 
         for r in range(BOARD_N):
             for c in range(BOARD_N):
@@ -122,11 +123,11 @@ class BitBoard:
                 cell_value = np_board[r][c]
 
                 if cell_value == self.LILLY:
-                    self.lilly_bits |= np.uint64(1 << pos)
+                    self.lilly_bits |= 1 << pos
                 elif cell_value == self.RED:
-                    self.frog_bits |= np.uint64(1 << pos)
+                    self.frog_bits |= 1 << pos
                 elif cell_value == self.BLUE:
-                    self.opp_bits |= np.uint64(1 << pos)
+                    self.opp_bits |= 1 << pos
 
         # Update occupied cells mask
         self._update_occupied_mask()
@@ -211,19 +212,19 @@ class BitBoard:
         self.frog_border_count = {self.RED: 0, self.BLUE: 0}
 
         # Get bottom row mask
-        bottom_row_mask = int(self._ROW_MASKS[BOARD_N - 1])
+        bottom_row_mask = self._ROW_MASKS[BOARD_N - 1]
 
         # Count frogs in bottom row
-        frogs_in_bottom = bin(int(self.frog_bits) & bottom_row_mask).count(
+        frogs_in_bottom = bin(self.frog_bits & bottom_row_mask).count(
             "1"
         )  # how many 1s are there ?
         self.frog_border_count[self.RED] = frogs_in_bottom  # frogs here means RED frogs
 
         # Get top row mask
-        top_row_mask = int(self._ROW_MASKS[0])
+        top_row_mask = self._ROW_MASKS[0]
 
         # Count opponents in top row using bit operations
-        opps_in_top = bin(int(self.opp_bits) & top_row_mask).count(
+        opps_in_top = bin(self.opp_bits & top_row_mask).count(
             "1"
         )  # blue frogs, all from pov of red for understanding
         self.frog_border_count[self.BLUE] = opps_in_top
@@ -445,7 +446,7 @@ class BitBoard:
             # Extract least significant 1-bit
             lsb = temp_bits & -temp_bits
             # Calculate position index using fast bit counting
-            pos_idx = int(lsb).bit_length() - 1
+            pos_idx = lsb.bit_length() - 1
             # Convert to row, col
             r, c = pos_idx // BOARD_N, pos_idx % BOARD_N
             out.append(Coord(r, c))
@@ -504,7 +505,7 @@ class BitBoard:
         temp_bits = player_bits
         while temp_bits:
             lsb = temp_bits & -temp_bits
-            pos_idx = int(lsb).bit_length() - 1
+            pos_idx = lsb.bit_length() - 1
             r, c = pos_idx // BOARD_N, pos_idx % BOARD_N
             if r != forbidden_row:  # Skip positions in forbidden row
                 all_pos.append(Coord(r, c))
@@ -576,7 +577,7 @@ class BitBoard:
                     ):
                         # Fast check for lily pad at destination
                         next_pos = next_r * BOARD_N + next_c
-                        if self.lilly_bits & np.uint64(1 << next_pos):
+                        if self.lilly_bits & (1 << next_pos):
                             move = MoveAction(Coord(r, c), [direction])
                             possible_moves.append((move, Coord(next_r, next_c)))
 
@@ -604,8 +605,8 @@ class BitBoard:
                     continue
 
                 # Check if mid cell has a piece (any player) and land cell is a lily pad
-                mid_bit = np.uint64(1 << mid_pos)
-                land_bit = np.uint64(1 << land_pos)
+                mid_bit = 1 << mid_pos
+                land_bit = 1 << land_pos
 
                 if (
                     (self.frog_bits & mid_bit or self.opp_bits & mid_bit)
@@ -815,7 +816,7 @@ class BitBoard:
             if 0 <= next_r < BOARD_N and 0 <= next_c < BOARD_N:
                 # Check if destination is a lily pad
                 pos = next_r * BOARD_N + next_c
-                if self.lilly_bits & np.uint64(1 << pos):
+                if self.lilly_bits & (1 << pos):
                     adjacent_count += 1
 
         return adjacent_count
@@ -898,4 +899,6 @@ def scaled_sigmoid(x, input_range=10, output_range=(0, 1)):
     normalized = 1 / (1 + math.exp(-x * (2 / input_range)))
     lo, hi = output_range
     return lo + normalized * (hi - lo)
+
+
 

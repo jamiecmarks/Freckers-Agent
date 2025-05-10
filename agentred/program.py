@@ -2,14 +2,10 @@
 # Project Part B: Game Playing Agent
 
 from referee.game import PlayerColor, Coord, Direction, Action, MoveAction, GrowAction
-import numpy as np
-import random
 from .bitboard import BitBoard
-from .mcts import MonteCarloTreeSearchNode
-from referee.game.constants import MAX_TURNS
-from .random_strat import RandomStrat
 import cProfile
 import pstats
+from .minimax import MinimaxSearchNode
 
 
 class Agent:
@@ -24,23 +20,23 @@ class Agent:
         Any setup and/or precomputation should be done here.
         """
         self._color = color
-        print("I am an mcts agent")
+        print("I am a minimax agent")
+
+        with open("red_pv_features.csv", "w") as pf:
+            print("Writing new file")
+            pf.write("move,centrality,double,distance,mobility\n")
 
         self.total_moves = 0
         bitboard = BitBoard()
+        self.root = MinimaxSearchNode(bitboard)
 
-        self.root = MonteCarloTreeSearchNode(bitboard)
+
 
     def action(self, **referee: dict) -> Action:
         """
         This method is called by the referee each time it is the agent's turn
         to take an action. It must always return an action object.
         """
-
-        # Below we have hardcoded two actions to be played depending on whether
-        # the agent is playing as BLUE or RED. Obviously this won't work beyond
-        # the initial moves of the game, so you should use some game playing
-        # technique(s) to determine the best action to take.
 
         profiler = cProfile.Profile()
         profiler.enable()
@@ -56,7 +52,6 @@ class Agent:
         # Save profiling data for later analysis
         stats.dump_stats("mcts_profile.prof")
 
-        # print(action_out["res_node"].state.get_board())
         return action_out["action"]
 
     def update(self, color: PlayerColor, action: Action, **referee: dict):
@@ -76,7 +71,8 @@ class Agent:
             # create a new child node
             new_board = self.root.state.move(action)
             new_board.toggle_player()
-            child = MonteCarloTreeSearchNode(new_board)
+            child = MinimaxSearchNode(new_board)
+            child.history = self.root.history
 
         child.time_budget = referee["time_remaining"]
 
