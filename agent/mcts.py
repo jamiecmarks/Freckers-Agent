@@ -146,7 +146,29 @@ class MonteCarloTreeSearchNode(Strategy):
                     r_diff = abs(res.r - avg_r)
                     position_bonus = -100 * r_diff  # Moderate penalty for spreading pieces
             
-            return prog_score + jump_bonus - lat_penalty + position_bonus
+            # Add frog spread penalty to prevent leaving frogs behind
+            frog_spread_penalty = 0
+            if res is not None:
+                # Calculate what the spread would be after this move
+                next_state = self.state.move(mv, res)
+                next_state_positions = next_state.get_all_pos(player)
+                if next_state_positions:
+                    rows = [r for r, _ in next_state_positions]
+                    spread = max(rows) - min(rows)
+                    
+                    # Penalize large spreads more in mid to late game
+                    if game_phase > 0.2:  # After 20% of game
+                        # Exponential penalty for large spreads
+                        frog_spread_penalty = -500 * (spread ** 2)
+                        
+                        # Extra penalty for extremely large spreads
+                        if spread > 3:
+                            frog_spread_penalty -= 2000 * (spread - 3)
+                    else:
+                        # Smaller penalty in early game
+                        frog_spread_penalty = -200 * spread
+            
+            return prog_score + jump_bonus - lat_penalty + position_bonus + frog_spread_penalty
 
         # Sort moves by score
         moves.sort(key=score, reverse=True)
@@ -194,7 +216,40 @@ class MonteCarloTreeSearchNode(Strategy):
                 r_diff = abs(res.r - avg_r)
                 position_bonus = -1.0 * r_diff  # Moderate penalty for spreading pieces
 
-        return self.W_PROG * prog - self.W_LAT * lat + jump_bonus + position_bonus
+        # Add frog spread penalty to prevent leaving frogs behind
+        frog_spread_bonus = 0
+        if res is not None:
+            # Calculate the spread before the move
+            current_positions = self.state.get_all_pos(p)
+            current_spread = 0
+            if current_positions:
+                current_rows = [r for r, _ in current_positions]
+                current_spread = np.var(current_rows) #max(current_rows) - min(current_rows)
+            
+            # Calculate what the spread would be after this move
+            next_state = self.state.move(mv, res)
+            next_state_positions = next_state.get_all_pos(p)
+            next_spread = 0
+            if next_state_positions:
+                next_rows = [r for r, _ in next_state_positions]
+                next_spread = np.var(next_rows) #max(next_rows) - min(next_rows)
+            
+            # Calculate the change in spread
+            spread_change = next_spread - current_spread
+            
+            # Reward reducing spread, penalize increasing it
+            if game_phase > 0.3:  # After 30% of game
+                # Stronger effect in mid to late game
+                frog_spread_bonus = -4.0 * spread_change
+                
+                # Extra penalty for increasing already large spreads
+                if spread_change > 0 and next_spread > 4:
+                    frog_spread_bonus -= 5.0 * spread_change
+            else:
+                # Smaller effect in early game
+                frog_spread_bonus = -1.5 * spread_change
+
+        return self.W_PROG * prog - self.W_LAT * lat + jump_bonus + position_bonus + frog_spread_bonus
 
     def _uct(self, child):
         exploit = child.q() / (child.n() + 1e-9)
@@ -269,6 +324,21 @@ class MonteCarloTreeSearchNode(Strategy):
                 - MonteCarloTreeSearchNode.ROLLOUT_W_LAT * lat
                 + 20 * (num_hops - 1)  # Strong multi-jump bonus
             )
+            
+            # Add frog spread penalty to rollout evaluation
+            if res is not None:
+                # Calculate what the spread would be after this move
+                next_state = state.move(mv, res)
+                next_state_positions = next_state.get_all_pos(player)
+                if next_state_positions:
+                    rows = [r for r, _ in next_state_positions]
+                    spread = max(rows) - min(rows)
+                    
+                    # Penalize large spreads in rollouts
+                    if game_phase > 0.3:  # After 30% of game
+                        val -= 10.0 * (spread ** 2)  # Stronger penalty in mid-late game
+                    else:
+                        val -= 5.0 * spread  # Lighter penalty in early game
             
             if val > best_val:
                 best_val, best = val, (mv, res)
