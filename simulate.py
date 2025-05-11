@@ -18,8 +18,7 @@ with tqdm(total=n, desc="Running Games", ncols=100) as pbar:
     for i in range(1, n + 1):
 
         subprocess.run(
-            [python_path, "-m", "referee", "agentblue", "agentred"],
-             stderr=subprocess.DEVNULL
+            [python_path, "-m", "referee", "agentred", "agentred"],
         )
 
         # Read current win count

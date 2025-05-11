@@ -1,7 +1,4 @@
 import abc
-from referee.game.actions import GrowAction, MoveAction
-from referee.game.coord import Coord
-
 
 class Strategy:
     def __init__(self, state):

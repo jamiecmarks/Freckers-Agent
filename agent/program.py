@@ -21,7 +21,6 @@ class Agent:
         """
         self._color = color
         print("I am an mcts agent")
-
         self.total_moves = 0
         bitboard = BitBoard()
         self.minimax = False
@@ -44,10 +43,9 @@ class Agent:
 
         self.root.time_budget = referee["time_remaining"]
         action_out = self.root.best_action()  # simulate only as many moves as possible
-        if self.root.minimax ==True:
-            print("minimax!")
-            self.minimax = True
         profiler.disable()
+        if self.root.minimax:
+            self.minimax = True
 
         stats = pstats.Stats(profiler)
 
@@ -69,20 +67,41 @@ class Agent:
         # action for demonstration purposes. You should replace this with your
         # own logic to update your agent's internal game state representation.
 
-        if self.root.minimax:
+        if self.minimax:
             new_board = self.root.state.move(action)
             new_board.toggle_player()
             child = MinimaxSearchNode(new_board)
-            child.time_budget = referee["time_remaining"]
-            self.root = child
-            return
-        child = self.root.find_child(action)
-        if child is None:
-            # create a new child node
-            new_board = self.root.state.move(action)
-            new_board.toggle_player()
-            child = MonteCarloTreeSearchNode(new_board)
-        
-        child.time_budget = referee["time_remaining"]
+        else:
 
+            child = self.root.find_child(action)
+            if child is None:
+                # create a new child node
+                new_board = self.root.state.move(action)
+                new_board.toggle_player()
+                child = MonteCarloTreeSearchNode(new_board)
+            
+        child.time_budget = referee["time_remaining"]
         self.root = child
+
+
+        #if self.root.minimax and not self.swapped:
+        #    # print("SWAPPING NOW")
+        #    new_board = self.root.state.move(action)
+        #    new_board.toggle_player()
+        #    new_mm_board = self.minimax_node
+        #    new_mm_board.state.board = new_board.get_board()
+        #    new_mm_board.time_budget = referee["time_remaining"]
+        #    new_mm_board.state.current_player = new_board.current_player
+        #    self.root = new_mm_board
+        #    self.swapped = True
+
+
+        #elif self.root.minimax and self.swapped:
+        #    # print("MINIMAX ALREADY SWAPPED")
+        #    new_board = self.root.state.move(action)
+        #    new_board.toggle_player()
+        #    child = MinimaxSearchNode(new_board)
+        #    child.time_budget = referee["time_remaining"]
+        #    self.root = child
+
+        
