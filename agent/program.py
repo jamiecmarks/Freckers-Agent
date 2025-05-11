@@ -10,6 +10,7 @@ from referee.game.constants import MAX_TURNS
 from .random_strat import RandomStrat
 import cProfile
 import pstats
+from .bitboard_working import BitBoardWorking
 
 
 class Agent:
@@ -64,12 +65,6 @@ class Agent:
         This method is called by the referee after a player has taken their
         turn. You should use it to update the agent's internal game state.
         """
-
-        # There are two possible action types: MOVE and GROW. Below we check
-        # which type of action was played and print out the details of the
-        # action for demonstration purposes. You should replace this with your
-        # own logic to update your agent's internal game state representation.
-
         child = self.root.find_child(action)
 
         if child is None:
@@ -77,7 +72,7 @@ class Agent:
             new_board = self.root.state.move(action)
             new_board.toggle_player()
             child = MonteCarloTreeSearchNode(new_board)
-
+        
         child.time_budget = referee["time_remaining"]
 
         self.root = child

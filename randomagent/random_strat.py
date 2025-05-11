@@ -34,7 +34,4 @@ class RandomStrat(Strategy):
 
         action = possible_moves[idx][0]
 
-        # res = None
-        # if not isinstance(action, GrowAction):
-        #     res = action.coord
         return {"action": action}

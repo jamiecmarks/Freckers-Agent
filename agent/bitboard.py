@@ -33,18 +33,6 @@ class BitBoard:
             mask |= 1 << (r * BOARD_N + c)
         _ROW_MASKS[r] = mask
 
-    ILLEGAL_RED_DIRECTIONS = set([
-        Direction.Up,
-        Direction.UpRight,
-        Direction.UpLeft,
-    ])
-
-    ILLEGAL_BLUE_DIRECTIONS = set([
-        Direction.Down,
-        Direction.DownRight,
-        Direction.DownLeft,
-    ])
-
     def __init__(self, board=None):
         # Initialize three 64-bit integers to represent the entire board
         # Each bit corresponds to one cell, with bit position = r*BOARD_N + c

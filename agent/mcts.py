@@ -45,10 +45,10 @@ class MonteCarloTreeSearchNode(Strategy):
     W_PROG = 4.0  # Extremely high weight for forward progress
     W_LAT = 0.1   # Very low weight for lateral movement
     W_BACK = 20.0  # Extremely high penalty for backwards moves
-    GROW_REQ = 3  # Higher grow requirement to reduce unnecessary grows
+    GROW_REQ = 2  # Higher grow requirement to reduce unnecessary grows
     PW_K = 2      # Focused search
     MAX_PLY = 150
-    MAX_ROLLOUT = 25  # Even shorter rollouts for faster iterations
+    MAX_ROLLOUT =  60 # Even shorter rollouts for faster iterations
 
     ROLLOUT_W_PROG = 40  # Extremely high weight for forward progress in rollouts
     ROLLOUT_W_LAT = 1    # Very low weight for lateral movement in rollouts
@@ -171,9 +171,10 @@ class MonteCarloTreeSearchNode(Strategy):
             if game_phase > 0.1:  # After 10% of game, grows are less valuable
                 return -5
             
-            return 0.1 * gain if gain and self.depth > 2 and self.depth < 30 else -5
+            return 0.3 * gain if gain and self.depth > 2 and self.depth < 45 else 0.2 * gain
 
         p = self.state.get_current_player()
+
         prog = _row_prog(p, mv.coord.r, res.r)
         lat = abs(res.c - (BOARD_N - 1) // 2)
         if prog < 0:
@@ -198,6 +199,7 @@ class MonteCarloTreeSearchNode(Strategy):
     def _uct(self, child):
         exploit = child.q() / (child.n() + 1e-9)
         bias = self._bias(*child.parent_action)
+
         explore = self.C * math.sqrt(math.log(self.n() + 1) / (child.n() + 1e-9))
 
         # Progressive bias that decreases with visits
