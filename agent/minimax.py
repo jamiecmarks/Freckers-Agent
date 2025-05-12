@@ -20,7 +20,6 @@ SPEEDUP_FACTOR = 1
 EVAL = "adaptive"
 RANDOM_START = 0
 
-
 class MinimaxSearchNode(Strategy):
     def __init__(self, state:BitBoard, parent = None, parent_action = None,
                  time_budget = 178.0):
@@ -137,21 +136,6 @@ class MinimaxSearchNode(Strategy):
                         progress -= (r+1) # starts at 1 up to 8
 
 
-        #original_player = state.current_player
-        #if me == BitBoard.RED:
-        #    state.current_player = BitBoard.RED
-        #    moves_me = state.get_all_moves()
-        #    state.current_player = BitBoard.BLUE
-        #    moves_you = state.get_all_moves()
-        #if me == BitBoard.BLUE:
-        #    state.current_player = BitBoard.BLUE
-        #    moves_me = state.get_all_moves()
-        #    state.current_player = BitBoard.RED
-        #    moves_you = state.get_all_moves()
-        #state.current_player = original_player
-
-        # norm_mobility = (len(moves_me) - len(moves_you))/20
-
         # normalize and combine
         norm_prog = progress/8
         # norm_mob  = (len(moves_me) - len(moves_you)) / (len(moves_me)+ len(moves_you) + 1)
@@ -162,7 +146,6 @@ class MinimaxSearchNode(Strategy):
         score = (
              norm_prog
             + norm_cent
-             # + norm_mobility
         )
        # print("And finally, current state score: ",score)
        # print()

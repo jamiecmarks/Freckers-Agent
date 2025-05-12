@@ -39,7 +39,7 @@ class MonteCarloTreeSearchNode(Strategy):
     # class‑level stats
     SIMS = 0
     AVG_LEN = 0.0
-    SWAP_THRESHOLD = 24
+    SWAP_THRESHOLD = 20
     # hyper‑params
     C = 0.2  # Reduced exploration for more exploitation
     W_PROG = 4.0  # Extremely high weight for forward progress
