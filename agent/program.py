@@ -20,7 +20,6 @@ class Agent:
         Any setup and/or precomputation should be done here.
         """
         self._color = color
-        print("I am an mcts agent")
         self.total_moves = 0
         bitboard = BitBoard()
         self.minimax = False
