@@ -25,7 +25,12 @@ class Agent:
         bitboard = BitBoard()
         self.minimax = False
         self.root = MonteCarloTreeSearchNode(bitboard)
+        # self.root.minimax = True
         # self.root = MinimaxSearchNode(bitboard)
+        # self.minimax = True
+
+        # print(type(self.root))
+
 
     def action(self, **referee: dict) -> Action:
         """

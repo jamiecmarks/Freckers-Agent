@@ -42,9 +42,6 @@ class MinimaxSearchNode(Strategy):
                            "distance": 0.9127612113952637, "mobility": 0.03814251720905304}
 
 
-
-
-
     def check_gameover_next(self):
         board = self.state
         if board.get_ply_count() > 148:
