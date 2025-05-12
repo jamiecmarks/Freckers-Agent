@@ -315,62 +315,8 @@ class MonteCarloTreeSearchNode(Strategy):
     # ------------------------------------------------------------------
     @staticmethod
     def _rollout_move(state: BitBoard):
-
         return state.get_random_move()
 
-        moves = state.get_all_moves()
-        player = state.get_current_player()
-        mid = (BOARD_N - 1) // 2
-
-        # Epsilon-greedy approach with dynamic epsilon
-        game_phase = state.ge
-
-        epsilon = 0.05 * (1 - game_phase)  # Less random in endgame
-        if random.random() < epsilon:
-            return state.get_random_move()
-
-        best_val, best = -1e9, None
-        for mv, res in moves:
-            if res is None:
-                # Very conservative grow consideration
-                if random.random() < 0.05 * (1 - game_phase) and state.hop_count() < 6:
-                    val = 10  # Moderate grow value
-                    if val > best_val:
-                        best_val, best = val, (mv, res)
-                continue
-
-            prog = _row_prog(player, mv.coord.r, res.r)
-            if prog < 0:
-                continue  # Skip backwards
-            lat = abs(res.c - mid)
-            num_hops = len(mv.directions)
-
-            # Enhanced rollout evaluation
-            val = (
-                MonteCarloTreeSearchNode.ROLLOUT_W_PROG * prog
-                - MonteCarloTreeSearchNode.ROLLOUT_W_LAT * lat
-                + 20 * (num_hops - 1)  # Strong multi-jump bonus
-            )
-
-            # Add frog spread penalty to rollout evaluation
-            if res is not None:
-                # Calculate what the spread would be after this move
-                next_state = state.move(mv, res)
-                next_state_positions = next_state.get_all_pos(player)
-                if next_state_positions:
-                    rows = [r for r, _ in next_state_positions]
-                    spread = max(rows) - min(rows)
-
-                    # Penalize large spreads in rollouts
-                    if game_phase > 0.3:  # After 30% of game
-                        val -= 10.0 * (spread**2)  # Stronger penalty in mid-late game
-                    else:
-                        val -= 5.0 * spread  # Lighter penalty in early game
-
-            if val > best_val:
-                best_val, best = val, (mv, res)
-
-        return best if best else random.choice(moves)
 
     def _simulate(self):
         bb = BitBoard(np.copy(self.state.get_board()))
