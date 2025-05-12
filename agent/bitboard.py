@@ -451,6 +451,7 @@ class BitBoard:
         # Convert to positions list
         all_pos = []
         temp_bits = player_bits
+
         while temp_bits:
             lsb = temp_bits & -temp_bits
             pos_idx = lsb.bit_length() - 1
@@ -458,6 +459,10 @@ class BitBoard:
             if r != forbidden_row:  # Skip positions in forbidden row
                 all_pos.append(Coord(r, c))
             temp_bits &= ~lsb
+        
+        # all_pos = [pos for pos in all_pos if pos.r != forbidden_row]
+
+        total_moves = len(all_pos) * 5
 
         random.shuffle(all_pos)
 
@@ -471,14 +476,8 @@ class BitBoard:
             # No moves found, return GrowAction
             return (GrowAction(), None)
 
-        # Add GrowAction and choose randomly
-        if rand_pos.r == forbidden_row:
-            return possible_moves[
-                0
-            ]  # Try to avoid GrowAction loops when near the end of the game
-
         possible_moves.append((GrowAction(), None))
-        return random.choices(possible_moves, k=1)[0]
+        return random.choices(possible_moves, k=1, weights=[(total_moves - 1)/ total_moves, 1 / total_moves])[0]
 
     def get_all_moves(self):
         """Get all possible moves for the current player"""
