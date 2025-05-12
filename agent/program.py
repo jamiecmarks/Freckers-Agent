@@ -10,7 +10,6 @@ from referee.game.constants import MAX_TURNS
 from .random_strat import RandomStrat
 import cProfile
 import pstats
-from .bitboard_working import BitBoardWorking
 
 
 class Agent:

@@ -111,7 +111,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 # Only consider grows in very early game
                 game_phase = self.state.get_ply_count() / 150
                 if game_phase > 0.1:  # After 10% of game, grows are less valuable
-                    return -5_000
+                    return 0.2
 
                 # Consider board state
                 lily_count = bin(self.state.lilly_bits).count("1")
@@ -175,7 +175,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 + jump_bonus
                 - lat_penalty
                 + position_bonus
-                + frog_spread_penalty
+                + 1.5*frog_spread_penalty
             )
 
         # Sort moves by score
@@ -199,12 +199,14 @@ class MonteCarloTreeSearchNode(Strategy):
             # Conservative grow bias
             game_phase = self.state.get_ply_count() / 150
             if game_phase > 0.1:  # After 10% of game, grows are less valuable
-                return -5
+                return (
+                    0.2 * gain
+                )
 
             return (
-                0.3 * gain
+                0.4 * gain
                 if gain and self.depth > 2 and self.depth < 45
-                else 0.2 * gain
+                else 0.3 * gain
             )
 
         p = self.state.get_current_player()
@@ -268,7 +270,7 @@ class MonteCarloTreeSearchNode(Strategy):
             - self.W_LAT * lat
             + jump_bonus
             + position_bonus
-            + frog_spread_bonus
+            + 1.2*frog_spread_bonus
         )
 
     def _uct(self, child):
