@@ -50,7 +50,7 @@ class MinimaxSearchNode(Strategy):
         board = self.state
         if board.get_ply_count() > 148:
 
-            eval = 10 * self.simple_eval(board)
+            eval = -10 * self.simple_eval(board)
             with open("eval.txt", "w") as fp:
                 fp.write(f"{eval}")
             return eval
@@ -61,7 +61,7 @@ class MinimaxSearchNode(Strategy):
             new_state = board.move(action[0], action[1])
             new_state.toggle_player()  # After move, opponent's turn
             if new_state.is_game_over():
-                eval = 10 * self.simple_eval(new_state)
+                eval = -10 * self.simple_eval(new_state)
 
                 with open("eval.txt", "w") as fp:
                     fp.write(f"{eval}")
@@ -226,8 +226,9 @@ class MinimaxSearchNode(Strategy):
         # 1) grab the referee‑supplied clock once
         # self.history.append((self.state.lilly_bits, self.state.frog_bits, self.state.opp_bits, self.state.get_current_player()))
         total_time = self.time_budget
-        assert total_time > safety_margin, "No time to move!"
         self.check_gameover_next()
+        assert total_time > safety_margin, "No time to move!"
+
         # 2) compute moves_left as before
         moves_played = self.state.get_ply_count()
         moves_left = (150 - moves_played)//2

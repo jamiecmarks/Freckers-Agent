@@ -39,7 +39,7 @@ class MonteCarloTreeSearchNode(Strategy):
     # class‑level stats
     SIMS = 0
     AVG_LEN = 0.0
-    SWAP_THRESHOLD = 24
+    SWAP_THRESHOLD = 120
     # hyper‑params
     C = 0.2  # Reduced exploration for more exploitation
     W_PROG = 4.0  # Extremely high weight for forward progress
@@ -86,6 +86,51 @@ class MonteCarloTreeSearchNode(Strategy):
 
     # ------------------------------------------------------------------
     #
+
+
+    def check_gameover_next(self):
+        board = self.state
+        if board.get_ply_count() > 148:
+
+            eval = -10 * self.simple_eval(board)
+            with open("eval.txt", "w") as fp:
+                fp.write(f"{eval}")
+            return eval
+
+        moves = board.get_all_moves()
+
+        for action in moves:
+            new_state = board.move(action[0], action[1])
+            new_state.toggle_player()  # After move, opponent's turn
+            if new_state.is_game_over():
+                eval = -10 * self.simple_eval(new_state)
+
+                with open("eval.txt", "w") as fp:
+                    fp.write(f"{eval}")
+                return eval
+        return 0
+
+    def simple_eval(self, state):
+        current_player = self.root_player
+        # If frog, we are moving towards the bottom
+        board = state.get_board()
+        progress = 0
+        if current_player == BitBoard.RED:
+            for r in range(BOARD_N): 
+                for c in range(BOARD_N):
+                    if board[r][c] == BitBoard.RED:
+                        progress += (r+1)
+                    elif board[r][c] == BitBoard.BLUE:
+                        progress -= (8 - (r))
+        if current_player == BitBoard.BLUE:
+            for r in range(BOARD_N):
+                for c in range(BOARD_N):
+                    if board[r][c] == BitBoard.BLUE:
+                        progress += (8 - (r))
+                    elif board[r][c] == BitBoard.RED:
+                        progress -= (r+1)
+        return progress/64
+
     def _frog_spread(self):
         # for RED, larger r = closer to goal; for BLUE vice versa
         rows = [
@@ -419,6 +464,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
     # ------------------------------------------------------------------
     def best_action(self, *, safety_margin=0.5, decay=0.975):
+        self.check_gameover_next()
         t0 = time.perf_counter()
         rem = self.time_budget - safety_margin
         assert rem > 0
@@ -452,3 +498,4 @@ class MonteCarloTreeSearchNode(Strategy):
             if ch.parent_action[0] == action:
                 return ch
         return None
+

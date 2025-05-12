@@ -847,3 +847,4 @@ def scaled_sigmoid(x, input_range=10, output_range=(0, 1)):
     normalized = 1 / (1 + math.exp(-x * (2 / input_range)))
     lo, hi = output_range
     return lo + normalized * (hi - lo)
+

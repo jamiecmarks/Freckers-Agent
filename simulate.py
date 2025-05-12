@@ -1,40 +1,38 @@
 import subprocess
 import sys
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
-# Step 1: Set up Python executable path
 python_path = sys.executable
 
-# Step 2: Define the number of games to run
-n = 10000  # Change this as needed
+# Parameters
+n_games_per_setting = 20
+depth_values = [ 6, 14, 20, 30, 40]
 
-# Step 3: Reset results.txt to "0"
+results = []
+
+    # Set swap depths
+
 with open("results.txt", "w") as f:
     f.write("0")
 
-# Step 4: Run the games with live win stats and a progress bar
-with tqdm(total=n, desc="Running Games", ncols=100) as pbar:
-    total_wins = 0
-    for i in range(1, n + 1):
+total_wins = 0
+for i in tqdm(range(n_games_per_setting), 
+                leave=False, ncols=80):
+    subprocess.run([python_path, "-m", "referee", "agent", "agent2"],
+                   )
 
-        subprocess.run(
-            [python_path, "-m", "referee", "agentred", "agentred"],
-        )
+    with open("eval.txt", "r") as f:
+        result = float(f.read().strip())
+        if result > 0:
+            total_wins += 1
+            print("Red wins (hybrid)")
+        else:
+            print("Blue wins (MCTS only)")
 
-        # Read current win count
-        with open("eval.txt", "r") as f:
-            output = float(f.read())
-            if output > 0:
-                total_wins +=1
+win_rate = total_wins / n_games_per_setting
+print(f"    vs Blue Depth {blue_depth}: {total_wins}/{n_games_per_setting} = {win_rate:.2%}")
 
 
-        # Update progress bar and win stats
-        pbar.set_postfix(wins=f"{total_wins}/{i}")
-        pbar.update(1)
 
-# Step 5: Final win rate
-with open("results.txt", "r") as f:
-    total_wins = int(f.read().strip())
 
-success_rate = (total_wins / n) * 100 if n > 0 else 0
-print(f"\nFinal Success Rate: {success_rate:.2f}%")
