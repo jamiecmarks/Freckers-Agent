@@ -39,7 +39,7 @@ class MonteCarloTreeSearchNode(Strategy):
     # class‑level stats
     SIMS = 0
     AVG_LEN = 0.0
-    SWAP_THRESHOLD = 20
+
     # hyper‑params
     C = 0.2  # Reduced exploration for more exploitation
     W_PROG = 4.0  # Extremely high weight for forward progress
@@ -52,6 +52,7 @@ class MonteCarloTreeSearchNode(Strategy):
 
     ROLLOUT_W_PROG = 40  # Extremely high weight for forward progress in rollouts
     ROLLOUT_W_LAT = 1  # Very low weight for lateral movement in rollouts
+    SWAP_THRESHOLD = 20
 
     def __init__(
         self, state: BitBoard, parent=None, parent_action=None, *, time_budget=178.0
@@ -112,7 +113,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 # Only consider grows in very early game
                 game_phase = self.state.get_ply_count() / 150
                 if game_phase > 0.1:  # After 10% of game, grows are less valuable
-                    return -5_000
+                    return 0.2
 
                 # Consider board state
                 lily_count = bin(self.state.lilly_bits).count("1")
@@ -176,7 +177,7 @@ class MonteCarloTreeSearchNode(Strategy):
                 + jump_bonus
                 - lat_penalty
                 + position_bonus
-                + frog_spread_penalty
+                + 1.5*frog_spread_penalty
             )
 
         # Sort moves by score
@@ -200,12 +201,14 @@ class MonteCarloTreeSearchNode(Strategy):
             # Conservative grow bias
             game_phase = self.state.get_ply_count() / 150
             if game_phase > 0.1:  # After 10% of game, grows are less valuable
-                return -5
+                return (
+                    0.2 * gain
+                )
 
             return (
-                0.3 * gain
+                0.4 * gain
                 if gain and self.depth > 2 and self.depth < 45
-                else 0.2 * gain
+                else 0.3 * gain
             )
 
         p = self.state.get_current_player()
@@ -269,7 +272,7 @@ class MonteCarloTreeSearchNode(Strategy):
             - self.W_LAT * lat
             + jump_bonus
             + position_bonus
-            + frog_spread_bonus
+            + 1.2*frog_spread_bonus
         )
 
     def _uct(self, child):
@@ -314,62 +317,8 @@ class MonteCarloTreeSearchNode(Strategy):
     # ------------------------------------------------------------------
     @staticmethod
     def _rollout_move(state: BitBoard):
-
         return state.get_random_move()
 
-        moves = state.get_all_moves()
-        player = state.get_current_player()
-        mid = (BOARD_N - 1) // 2
-
-        # Epsilon-greedy approach with dynamic epsilon
-        game_phase = state.ge
-
-        epsilon = 0.05 * (1 - game_phase)  # Less random in endgame
-        if random.random() < epsilon:
-            return state.get_random_move()
-
-        best_val, best = -1e9, None
-        for mv, res in moves:
-            if res is None:
-                # Very conservative grow consideration
-                if random.random() < 0.05 * (1 - game_phase) and state.hop_count() < 6:
-                    val = 10  # Moderate grow value
-                    if val > best_val:
-                        best_val, best = val, (mv, res)
-                continue
-
-            prog = _row_prog(player, mv.coord.r, res.r)
-            if prog < 0:
-                continue  # Skip backwards
-            lat = abs(res.c - mid)
-            num_hops = len(mv.directions)
-
-            # Enhanced rollout evaluation
-            val = (
-                MonteCarloTreeSearchNode.ROLLOUT_W_PROG * prog
-                - MonteCarloTreeSearchNode.ROLLOUT_W_LAT * lat
-                + 20 * (num_hops - 1)  # Strong multi-jump bonus
-            )
-
-            # Add frog spread penalty to rollout evaluation
-            if res is not None:
-                # Calculate what the spread would be after this move
-                next_state = state.move(mv, res)
-                next_state_positions = next_state.get_all_pos(player)
-                if next_state_positions:
-                    rows = [r for r, _ in next_state_positions]
-                    spread = max(rows) - min(rows)
-
-                    # Penalize large spreads in rollouts
-                    if game_phase > 0.3:  # After 30% of game
-                        val -= 10.0 * (spread**2)  # Stronger penalty in mid-late game
-                    else:
-                        val -= 5.0 * spread  # Lighter penalty in early game
-
-            if val > best_val:
-                best_val, best = val, (mv, res)
-
-        return best if best else random.choice(moves)
 
     def _simulate(self):
         bb = BitBoard(np.copy(self.state.get_board()))
@@ -429,6 +378,7 @@ class MonteCarloTreeSearchNode(Strategy):
         sims = 0
         if self.state.get_ply_count() > self.SWAP_THRESHOLD:
             self.minimax = True # Will swap on the next move
+
         while time.perf_counter() < deadline:
             leaf = self._tree_policy()
             res, amaf = leaf._simulate()
