@@ -97,13 +97,6 @@ class MinimaxSearchNode(Strategy):
         w = self.weights
         me = self.root_player
 
-
-
-       # print("Root: ", self.root_player)
-       # print("Original state:\n", self.state.render())
-       # print("Current state:\n", state.render())
-
-
         you = BitBoard.RED if me == BitBoard.BLUE else BitBoard.BLUE
         board = state.get_board()
         progress = 0 
@@ -132,20 +125,14 @@ class MinimaxSearchNode(Strategy):
                         centrality -= mid - abs(c-mid) 
                         progress -= (r+1) # starts at 1 up to 8
 
-
         # normalize and combine
         norm_prog = progress/8
-        # norm_mob  = (len(moves_me) - len(moves_you)) / (len(moves_me)+ len(moves_you) + 1)
         norm_cent  = (centrality)/64
-        # norm_doubles = (doubles_me - doubles_you)/(doubles_me + doubles_you + 1)
-        
         
         score = (
              norm_prog
             + norm_cent
         )
-       # print("And finally, current state score: ",score)
-       # print()
 
         return score
 
@@ -265,23 +252,16 @@ class MinimaxSearchNode(Strategy):
                 alpha0 = max(alpha0, best_score_local)
 
                 if alpha0 == float("inf"):
-                    print("Win found at depth", depth)
                     early_return_flag = True
                     best_action = best_action_local
                     break
 
 
             depth += 1
-        print("Last attempted depth: ", depth)
-
-        
-
 
         if best_action is None:
             # fallback to first legal move
             best_action = self.state.get_all_moves()[0]
-
-        print(f"Selected move: {best_action}")
 
         return {"action": best_action[0]}
 

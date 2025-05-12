@@ -14,11 +14,6 @@ from referee.game.coord import Coord
 from .bitboard import BitBoard
 from .strategy import Strategy
 
-# ---------------------------------------------------------------------------
-#  Utility helpers
-# ---------------------------------------------------------------------------
-
-
 def _action_key(action: MoveAction, res: Optional[Coord]) -> Tuple:
     return ("G",) if res is None else (action.coord.r, action.coord.c, res.r, res.c)
 
@@ -317,7 +312,36 @@ class MonteCarloTreeSearchNode(Strategy):
     # ------------------------------------------------------------------
     @staticmethod
     def _rollout_move(state: BitBoard):
-        return state.get_random_move()
+        # Epsilon-greedy approach with high epsilon (mostly random)
+        epsilon = 0.8
+        
+        if random.random() < epsilon:
+            return state.get_random_move()
+        else:
+            moves = state.get_all_moves()
+            if not moves:
+                return None, None
+                
+            player = state.get_current_player()
+            
+            def score_move(move_res):
+                move, res = move_res
+                if res is None:  # Grow action
+                    return 1  # Grow actions have a decent chance of being chosen
+                
+                r0 = move.coord.r
+                r1 = res.r
+                prog = (r1 - r0) if player == BitBoard.RED else (r0 - r1)
+                return prog
+                
+            # Create a weighted distribution based on scores
+            scores = [max(0.1, score_move(move)) for move in moves]  # Ensure positive weights
+            total_score = sum(scores)
+            probabilities = [score/total_score for score in scores]
+            
+            # Sample from the distribution
+            chosen_idx = random.choices(range(len(moves)), weights=probabilities, k=1)[0]
+            return moves[chosen_idx]
 
 
     def _simulate(self):
@@ -390,7 +414,6 @@ class MonteCarloTreeSearchNode(Strategy):
             leaf._backprop(res, amaf)
             sims = 1
         best = max(self.children, key=lambda c: (c.n(), c.q() / (c.n() + 1e-9)))
-        print(f"[MCTS] sims={sims}  avg_len={self.AVG_LEN:0.1f}")
         return {
             "action": best.parent_action[0],
             "res": best.parent_action[1],

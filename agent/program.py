@@ -25,11 +25,6 @@ class Agent:
         bitboard = BitBoard()
         self.minimax = False
         self.root = MonteCarloTreeSearchNode(bitboard)
-        # self.root.minimax = True
-        # self.root = MinimaxSearchNode(bitboard)
-        # self.minimax = True
-
-        # print(type(self.root))
 
 
     def action(self, **referee: dict) -> Action:
@@ -67,11 +62,6 @@ class Agent:
         turn. You should use it to update the agent's internal game state.
         """
 
-        # There are two possible action types: MOVE and GROW. Below we check
-        # which type of action was played and print out the details of the
-        # action for demonstration purposes. You should replace this with your
-        # own logic to update your agent's internal game state representation.
-
         if self.minimax:
             new_board = self.root.state.move(action)
             new_board.toggle_player()
@@ -87,26 +77,3 @@ class Agent:
             
         child.time_budget = referee["time_remaining"]
         self.root = child
-
-
-        #if self.root.minimax and not self.swapped:
-        #    # print("SWAPPING NOW")
-        #    new_board = self.root.state.move(action)
-        #    new_board.toggle_player()
-        #    new_mm_board = self.minimax_node
-        #    new_mm_board.state.board = new_board.get_board()
-        #    new_mm_board.time_budget = referee["time_remaining"]
-        #    new_mm_board.state.current_player = new_board.current_player
-        #    self.root = new_mm_board
-        #    self.swapped = True
-
-
-        #elif self.root.minimax and self.swapped:
-        #    # print("MINIMAX ALREADY SWAPPED")
-        #    new_board = self.root.state.move(action)
-        #    new_board.toggle_player()
-        #    child = MinimaxSearchNode(new_board)
-        #    child.time_budget = referee["time_remaining"]
-        #    self.root = child
-
-        
