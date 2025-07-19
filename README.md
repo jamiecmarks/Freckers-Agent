@@ -1,35 +1,13 @@
-# ai-projB
-# Ideas
+# Artificial Intelligence Project B
 
-# Param ideas:
+## Overview
 
-## MCTS
-Right now it seems like:
-sims = 70, max_depth = 30 and c = 0.25 is giving pretty decent results
+This repository includes a game playing agent that uses a minimax and alpha-beta pruning to play the game Freckers. 
 
-## Some things that would would be sick if you checked out and tried to make better:
+The agent plays the game at a high level, and is able to beat a human player. Freckers is a game similar to checkers, but with with frogs that can chain-jump over other frogs. The goal is to try and get to the other side of the board. Freckers is a checkers-like game that uses frogs that can chain-jump.
 
-1. Sometimes when there is only a few moves available the agent will grow even if its not beneficial at all, even though I de-weighted growing. Would be sick if you could figure that out.
+Also included is a detailed report that explains the purpose of the project and the considerations made to reach the final agent that we did.
 
-1. Check out the new `best_child` function in `mcts.py`. I tried a bunch of different strats to change the weighting of certain moves during play. For example in early game its pretty much a random choice between going towards the centre or growing. Then it gets back to the normal formula near the end of the game.
-Throughout the whole game, there's a penalty for allowing opponent multi-jumps.
-Also there is a strong bias for multi-jumps during the whole game. It seems to work out pretty well. Like in early game we usually get at least 1 frog in the last row via some crazy multi-jump. 
+## Contributers
 
-1. Check out dynamic_c, this is a function that changes the c value based on how far we are into the game. 
-
-1. Check out the Strat class and the RandomStrat in the `rangomagent` folder. Maybe implement other strats if you wanna try them out. Weighted random would be good and also just using the count heuristic thing in mcts.
-
-To run the mcts agent against the random agent you just need to run
-```bash
-python -m referee randomagent agent
-```
-
-Here red will be a random agent and blue will be mcts, just swap arguments to change order.
-
-1. Although I've tried to make it smarter. In the start of the game it kind of plays like the random agent. Doesn't seem to smart. Maybe check that out
-
-
-# From tutor tips 
-Use cProfile for time limit stuff. 
-Use cProfile.run() and snakeviz another library to find the bottlenecks in your code.
-
+This project was done jointly between Jamie A.C. Marks and Joshua Munday.
