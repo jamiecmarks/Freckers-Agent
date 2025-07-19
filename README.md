@@ -1,4 +1,4 @@
-# Artificial Intelligence Project B.
+# Artificial Intelligence Project B
 
 ## Overview
 
